@@ -43,6 +43,7 @@ class Settings(BaseSettings):
     database_url: str = (
         "postgresql+asyncpg://postgres:postgres@localhost:5432/adaptive_review"
     )
+    database_echo_logging: bool = False  # emit SQL statements to the log
     redis_url: str = "redis://localhost:6379/0"
 
     # --- LLM ---------------------------------------------------------------

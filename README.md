@@ -167,14 +167,19 @@ datasets/           Dataset registration and processing scripts
 
 ## Current status
 
-**Phase 1 complete — Architecture + project scaffold.**
+**Phase 2 complete — PostgreSQL persistence layer.**
 
 - Phase 0: full design documentation (`docs/`).
 - Phase 1: requirements frozen (`docs/REQUIREMENTS.md`), backend package installed
   (`adaptive-review` 0.1.0, editable), application shell with `/health`,
   `pydantic-settings` config layer with production secret guard, lint/mypy/tests green.
+- Phase 2: SQLAlchemy 2.0 async models for all 15 tables (`backend/app/models/`),
+  async engine/session factory (`backend/app/database/`), Alembic migrations with
+  pgvector (offline SQL validated via `alembic upgrade head --sql`). 22 tests
+  collected: 20 pass (2 of these are live-DB integration round-trips that skip
+  cleanly until PostgreSQL is reachable), plus the pre-existing health/settings tests.
 
-Remaining phases (2–19) are tracked in `docs/ROADMAP.md`. Features not yet implemented
+Remaining phases (3–19) are tracked in `docs/ROADMAP.md`. Features not yet implemented
 are NOT claimed.
 
 ---

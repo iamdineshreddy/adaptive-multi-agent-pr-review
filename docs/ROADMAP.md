@@ -8,7 +8,7 @@ pass.
 | --- | --- | --- |
 | 0 | Design & architecture docs (ARCHITECTURE, ARUM, DATABASE, API, QUEUE, AGENTS, RESEARCH, EXPERIMENTS, SECURITY) | **done** |
 | 1 | Requirements freeze; folder scaffold; config (`pydantic-settings`); workspace/dependency layout | **done** |
-| 2 | DB: SQLAlchemy models, asyncpg, Alembic migrations, pgvector, seed fixtures | todo |
+| 2 | DB: SQLAlchemy models, asyncpg, Alembic migrations, pgvector, seed fixtures | **done** (schema + migrations + metadata tests; live-DB round-trip tests self-skip without PostgreSQL) |
 | 3 | GitHub webhook service: signature verify, Pydantic validation, idempotency, PR ingestion | todo |
 | 4 | Queue: Celery app, Redis broker, priority zset, queues, retries, dead-letter | todo |
 | 5 | Agents: security, quality, performance, architecture, standards — structured output, LLM provider abstraction | todo |
