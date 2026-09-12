@@ -10,7 +10,7 @@ pass.
 | 1 | Requirements freeze; folder scaffold; config (`pydantic-settings`); workspace/dependency layout | **done** |
 | 2 | DB: SQLAlchemy models, asyncpg, Alembic migrations, pgvector, seed fixtures | **done** (schema + migrations + metadata tests; live-DB round-trip tests self-skip without PostgreSQL) |
 | 3 | GitHub webhook service: signature verify, Pydantic validation, idempotency, PR ingestion | **done** (`POST /api/v1/webhooks/github`, HMAC-SHA256/SHA1, rate limits, ping/unknown-event handling, SqlReviewIngester with delivery-id idempotency, priority scoring per QUEUE.md §2; dispatch is log-only until the Phase 4 broker — see below; 27 webhook tests + live-DB ingestion test that self-skips without PostgreSQL) |
-| 4 | Queue: Celery app, Redis broker, priority zset, queues, retries, dead-letter | todo |
+| 4 | Queue: Celery app, Redis broker, priority zset, queues, retries, dead-letter | **done** (Celery app + Redis broker, queue routes from QUEUE.md §1, `RedisPriorityStore` zset scheduling, bounded backoff retries, `dead_letters` table + Review→FAILED with `failure_reason`, scheduler pop task; the orchestrator hand-off it pops for is Phase 6) |
 | 5 | Agents: security, quality, performance, architecture, standards — structured output, LLM provider abstraction | todo |
 | 6 | Supervisor + LangGraph orchestration: states/transitions, fan-out, retry/failure paths | todo |
 | 7 | Finding consolidation + cross-agent redundancy detection (embeddings + cosine + proximity) | todo |
@@ -37,6 +37,14 @@ where the ingestion worker needs that data for analysis. The Phase 3 webhook onl
 consumes what GitHub sends in the event payload; changed-file-driven priority
 factors (security, dependency, component) therefore stay at their documented 0.0
 baseline until then.
+
+Phase 4 scope note: the **priority zset and scheduler are implemented and wired**
+(webhook → `pr_ingestion_queue` → zset → `queue.pop_and_stage`), but the popped
+review is handed to the orchestrator in Phase 6 (LangGraph). Until then
+`queue.pop_and_stage` records the hand-off intent and returns the review id —
+it does not pretend to run agents. Without a broker, dispatch falls back to the
+Phase 3 log-only provider via `queue_dispatch_provider=logging` (default is
+`celery`, which requires a reachable broker and surfaces enqueue failure as a 500).
 
 ## Cross-cutting requirements (apply every phase)
 

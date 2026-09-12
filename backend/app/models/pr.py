@@ -125,6 +125,7 @@ class Review(Base):
     github_delivery_id: Mapped[str | None] = mapped_column(
         String(64), unique=True, index=True
     )
+    failure_reason: Mapped[str | None] = mapped_column(Text)
     budget_cap: Mapped[int | None] = mapped_column(Integer)
     arum_version: Mapped[str | None] = mapped_column(Text)
     root_cause: Mapped[str | None] = mapped_column(Text)

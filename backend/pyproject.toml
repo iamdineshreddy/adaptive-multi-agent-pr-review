@@ -70,3 +70,13 @@ select = ["E", "F", "I", "N", "UP", "B", "SIM"]
 python_version = "3.11"
 strict = true
 plugins = ["pydantic.mypy"]
+
+[[tool.mypy.overrides]]
+module = ["celery", "celery.*", "kombu", "kombu.*", "billiard", "vine"]
+ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+# Celery's task decorator is untyped; the tasks are thin sync wrappers over
+# typed async cores (app.queue.tasks), which are the actual unit-tested surface.
+module = ["app.queue.tasks", "app.queue.celery_app"]
+disable_error_code = ["untyped-decorator", "no-untyped-def", "no-any-return"]

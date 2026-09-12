@@ -2,6 +2,7 @@
 
 from app.models.agents import Agent, AgentMetric, ReviewTask
 from app.models.base import Base
+from app.models.deadletter import DeadLetter
 from app.models.enums import (
     ConfidenceLevel,
     FeedbackOutcome,
@@ -27,6 +28,7 @@ __all__ = [
     "Base",
     "CodingStandard",
     "ConfidenceLevel",
+    "DeadLetter",
     "DeveloperFeedback",
     "Embedding",
     "FeedbackOutcome",

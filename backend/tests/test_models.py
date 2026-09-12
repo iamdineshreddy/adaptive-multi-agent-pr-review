@@ -33,6 +33,7 @@ EXPECTED_TABLES: set[str] = {
     "repository_memory",
     "embeddings",
     "system_metrics",
+    "dead_letters",
 }
 
 
@@ -142,6 +143,7 @@ def test_foreign_keys_enforce_table_relationships() -> None:
         "repository_memory": {"repositories"},
         "embeddings": {"repositories", "findings"},
         "system_metrics": {"repositories"},
+        "dead_letters": {"reviews"},
     }
     for table_name, referred in fk_map.items():
         actual = {fk.column.table.name for fk in _table(table_name).foreign_keys}
@@ -199,6 +201,7 @@ def test_reviews_track_arum_budget_and_decisions() -> None:
         "arum_version",
         "root_cause",
         "feedback_aggregate",
+        "failure_reason",
         "started_at",
         "completed_at",
     ):

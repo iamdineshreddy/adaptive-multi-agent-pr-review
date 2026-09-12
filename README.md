@@ -167,7 +167,7 @@ datasets/           Dataset registration and processing scripts
 
 ## Current status
 
-**Phase 3 complete — GitHub webhook service.**
+**Phase 4 complete — queue, priority scheduling, retries, dead-letter.**
 
 - Phase 0: full design documentation (`docs/`).
 - Phase 1: requirements frozen (`docs/REQUIREMENTS.md`), backend package installed
@@ -181,9 +181,16 @@ datasets/           Dataset registration and processing scripts
 - Phase 3: `POST /api/v1/webhooks/github` (`backend/app/webhooks/`) — HMAC-SHA256/SHA1
   signature verification, Pydantic validation (422), rate limiting, delivery-id
   idempotency, PR ingestion into PostgreSQL, and priority scoring per `docs/QUEUE.md`
-  §2. Dispatch is Honest log-only until the Phase 4 broker. 50 tests: 47 pass,
-  3 live-DB tests self-skip without PostgreSQL. FR-1.3 (GitHub API client) is
-  intentionally deferred to Phase 5 — see `docs/ROADMAP.md`.
+  §2. Dispatch is log-only until the Phase 4 broker. 50 tests: 47 pass, 3 live-DB
+  tests self-skip without PostgreSQL. FR-1.3 (GitHub API client) is intentionally
+  deferred to Phase 5 — see `docs/ROADMAP.md`.
+- Phase 4: Celery app + Redis broker (`backend/app/queue/`) with the QUEUE.md §1
+  routes, Redis sorted-set priority scheduling (`RedisPriorityStore`), bounded
+  backoff retries, a durable `dead_letters` table + terminal Review→`FAILED` with
+  `failure_reason` (`0003_queue_dead_letter`), and `CeleryDispatcher` publishing to
+  `pr_ingestion_queue`. Scheduler pop-and-stage hands off to the Phase 6
+  orchestrator. 66 tests: 60 pass (6 live-dependency tests self-skip without
+  PostgreSQL/Redis).
 
 Remaining phases (3–19) are tracked in `docs/ROADMAP.md`. Features not yet implemented
 are NOT claimed.

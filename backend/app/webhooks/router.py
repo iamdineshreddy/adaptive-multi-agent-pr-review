@@ -15,6 +15,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 from pydantic import BaseModel, ConfigDict, ValidationError
 
 from app.config.settings import get_settings
+from app.queue.dispatch import CeleryDispatcher
 from app.webhooks.dispatch import LoggingDispatcher, ReviewDispatcher
 from app.webhooks.ingest import ReviewIngester, SqlReviewIngester
 from app.webhooks.ratelimit import MemoryRateLimiter
@@ -79,7 +80,10 @@ def get_ingester() -> ReviewIngester:
 def get_dispatcher() -> ReviewDispatcher:
     global _dispatcher
     if _dispatcher is None:
-        _dispatcher = LoggingDispatcher()
+        if get_settings().queue_dispatch_provider == "celery":
+            _dispatcher = CeleryDispatcher()
+        else:
+            _dispatcher = LoggingDispatcher()
     return _dispatcher
 
 

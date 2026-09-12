@@ -83,6 +83,8 @@ class Settings(BaseSettings):
     celery_max_retries: int = 4
     celery_retry_backoff_seconds: int = 30
     celery_priority_redis_key: str = "adaptive_review:priority"
+    celery_dead_letter_redis_key: str = "adaptive_review:dead_letter"
+    queue_dispatch_provider: str = "celery"  # "celery" | "logging"
 
     # --- Observability -------------------------------------------------------
     langfuse_public_key: str = ""

@@ -16,6 +16,7 @@ from sqlalchemy.ext.asyncio import AsyncEngine, create_async_engine
 from app.config.settings import get_settings
 from app.database import SessionFactory, create_db_engine
 from app.models import Base, Repository, User
+from app.queue.db import fetch_priority_score, mark_review_failed
 from app.webhooks.ingest import IngestOutcome, SqlReviewIngester
 from app.webhooks.schemas import PullRequestWebhookEvent
 
@@ -148,3 +149,126 @@ async def test_webhook_ingest_creates_review() -> None:
             assert count == 1
     finally:
         await engine.dispose()
+
+
+async def _seed_review(engine: AsyncEngine) -> uuid.UUID:
+    """Create a repository + PR + review and return the review id."""
+    repo_id = uuid.uuid4()
+    pr_id = uuid.uuid4()
+    review_id = uuid.uuid4()
+    async with engine.begin() as conn:
+        await conn.execute(
+            text(
+                "INSERT INTO repositories (id, github_id, full_name, default_branch) "
+                "VALUES (:id, :gid, :name, 'main')"
+            ),
+            {
+                "id": repo_id,
+                "gid": 7001,
+                "name": f"integration/queue-{uuid.uuid4().hex[:8]}",
+            },
+        )
+        await conn.execute(
+            text(
+                "INSERT INTO pull_requests (id, repository_id, github_pr_id, number, "
+                "title, author_login, base_ref, head_ref, head_sha, state, "
+                "changed_files, additions, deletions) "
+                "VALUES (:id, :rid, 7, 7, 't', 'a', 'main', 'feat', 'sha', "
+                "'OPEN', 1, 2, 0)"
+            ),
+            {"id": pr_id, "rid": repo_id},
+        )
+        await conn.execute(
+            text(
+                "INSERT INTO reviews (id, pull_request_id, repository_id, status, "
+                "mode, priority_score, risk_class, github_delivery_id) "
+                "VALUES (:id, :prid, :rid, 'QUEUED', 'OPENED', 6.5, 'MEDIUM', :d)"
+            ),
+            {"id": review_id, "prid": pr_id, "rid": repo_id, "d": str(uuid.uuid4())},
+        )
+    return review_id
+
+
+async def test_queue_failure_helpers() -> None:
+    """fetch_priority_score reads and mark_review_failed flips to FAILED+reason."""
+    await _require_db()
+    engine = create_db_engine()
+    try:
+        await _reset_schema(engine)
+        review_id = await _seed_review(engine)
+
+        assert await fetch_priority_score(SessionFactory, review_id) == 6.5
+
+        failed = await mark_review_failed(
+            SessionFactory, review_id, "exhausted retries"
+        )
+        assert failed is True
+        async with SessionFactory() as session:
+            row = (
+                await session.execute(
+                    text("SELECT status, failure_reason FROM reviews WHERE id = :id"),
+                    {"id": review_id},
+                )
+            ).one()
+            assert row.status == "FAILED"
+            assert row.failure_reason == "exhausted retries"
+    finally:
+        await engine.dispose()
+
+
+async def test_dead_letter_row_persists() -> None:
+    """dead_letters table round-trips a dead-letter record."""
+    await _require_db()
+    engine = create_db_engine()
+    try:
+        await _reset_schema(engine)
+        review_id = await _seed_review(engine)
+        async with engine.begin() as conn:
+            await conn.execute(
+                text(
+                    "INSERT INTO dead_letters (id, review_id, delivery_id, queue_name, "
+                    "task_name, error, attempts) "
+                    "VALUES (:id, :rid, 'd1', 'pr_ingestion_queue', "
+                    "'queue.enqueue_review', 'boom', 5)"
+                ),
+                {"id": uuid.uuid4(), "rid": review_id},
+            )
+        async with SessionFactory() as session:
+            count = (
+                await session.execute(text("SELECT COUNT(*) FROM dead_letters"))
+            ).scalar()
+            assert count == 1
+    finally:
+        await engine.dispose()
+
+
+async def test_priority_store_via_redis() -> None:
+    """Redis sorted-set scheduling round-trip (skips without a broker host)."""
+    import redis.asyncio as redis
+
+    from app.queue.priority import RedisPriorityStore
+
+    client = redis.Redis.from_url(get_settings().redis_url)
+    try:
+        await client.ping()
+    except Exception as exc:  # pragma: no cover - environment dependent
+        pytest.skip(
+            f"Redis not reachable at {get_settings().redis_url} "
+            f"({type(exc).__name__}); skipping priority-store test."
+        )
+    finally:
+        await client.aclose()
+
+    store = RedisPriorityStore()
+    try:
+        await store.reset()
+        r1, r2 = uuid.uuid4(), uuid.uuid4()
+        await store.enqueue(r1, 4.0, 1)
+        await store.enqueue(r2, 9.0, 2)
+        entry = await store.pop_highest()
+        assert entry is not None
+        assert entry.review_id == r2
+        assert entry.score == 9.0
+        assert await store.size() == 1
+    finally:
+        await store.aclose()

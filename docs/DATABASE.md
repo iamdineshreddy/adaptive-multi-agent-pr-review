@@ -109,6 +109,8 @@ Unique index: `(repository_id, number)`. Index: `priority_score`, `state`, `head
 | mode | text | `opened` / `synchronize` / `manual_rerun` |
 | priority_score | numeric | captured at creation |
 | risk_class | text | |
+| github_delivery_id | varchar(64) unique | webhook idempotency key (Phase 3) |
+| failure_reason | text null | reason if terminal FAILED (Phase 4) |
 | budget_cap | int | resolved cap for this review |
 | arum_version | text null | model family used |
 | root_cause | text null | if FAILED |
@@ -294,6 +296,23 @@ Aggregate/derived counters (also mirror Prometheus; persisted for research queri
 | sampled_at | timestamptz | |
 
 Index: `(metric_name, sampled_at)`.
+
+### 3.16 `dead_letters`
+Durable dead-letter log (docs/QUEUE.md §6): tasks that exhausted `max_retries`
+without a silent drop. The Redis dead-letter list is the ephemeral signal; this
+table backs the dashboard/alerting.
+| column | type | notes |
+| --- | --- | --- |
+| id | uuid PK | |
+| review_id | uuid FK not null | terminal FAILED review |
+| delivery_id | text null | webhook delivery, if any |
+| queue_name | text | from QUEUE.md §1 |
+| task_name | text | Celery task name |
+| error | text | final error message |
+| attempts | int | total retry attempts |
+| created_at | timestamptz | |
+
+Index: `review_id`.
 
 ---
 

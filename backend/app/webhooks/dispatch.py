@@ -1,36 +1,25 @@
-"""Dispatch boundary between the webhook HTTP layer and the queue (Phase 4).
+"""Dispatch boundary implementations.
 
 The webhook must return immediately (docs/ARCHITECTURE.md §4.1) while AI work is
-deferred to the queue. Phase 3 has no broker yet, so ``LoggingDispatcher`` records
-the dispatch intent in structured logs -- it does NOT pretend to enqueue. Phase 4
-replaces it with a Celery-backed dispatcher (``pr_ingestion_queue``).
+deferred to the queue. ``CeleryDispatcher`` (Phase 4) publishes to
+``pr_ingestion_queue``; ``LoggingDispatcher`` is the Phase 3 fallback that records
+dispatch intent without a broker (never pretends to enqueue).
 """
 
 from __future__ import annotations
 
-from dataclasses import dataclass
-from typing import Protocol
-
 import structlog
+
+from app.queue.contracts import DispatchResult, ReviewDispatcher
+
+__all__ = ["DispatchResult", "LoggingDispatcher", "ReviewDispatcher"]
 
 logger = structlog.get_logger(__name__)
 
 _PR_INGESTION_QUEUE = "pr_ingestion_queue"
 
 
-@dataclass(frozen=True)
-class DispatchResult:
-    dispatched: bool
-    note: str
-
-
-class ReviewDispatcher(Protocol):
-    """Boundary over the broker (replaced by the Celery implementation)."""
-
-    async def dispatch(self, review_id: object, delivery_id: str) -> DispatchResult: ...
-
-
-class LoggingDispatcher:
+class LoggingDispatcher(ReviewDispatcher):
     """Records dispatch intent; no broker connection (Phase 4 wires Celery)."""
 
     async def dispatch(self, review_id: object, delivery_id: str) -> DispatchResult:
