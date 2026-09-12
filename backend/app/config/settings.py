@@ -1,0 +1,103 @@
+"""Application configuration.
+
+Settings are loaded from environment variables with the ``ADAPTIVE_`` prefix and
+optionally a local ``.env`` file. No secrets are stored in this file.
+"""
+
+from __future__ import annotations
+
+from functools import lru_cache
+
+from pydantic import model_validator
+from pydantic_settings import BaseSettings, SettingsConfigDict
+
+
+class Settings(BaseSettings):
+    """Runtime configuration for the review platform."""
+
+    model_config = SettingsConfigDict(
+        env_prefix="ADAPTIVE_",
+        env_file=".env",
+        env_file_encoding="utf-8",
+        extra="ignore",
+    )
+
+    # --- Environment -------------------------------------------------------
+    env: str = "development"
+    debug: bool = True
+
+    # --- Security ----------------------------------------------------------
+    secret_key: str = ""
+    github_webhook_secret: str = ""
+    api_token_hashes: list[str] = []  # salted hashes of API tokens
+
+    # --- GitHub ------------------------------------------------------------
+    github_app_id: str = ""
+    github_app_private_key: str = (
+        ""  # PEM as single env value (secrets manager in prod)
+    )
+    github_pat: str = ""  # alternative PAT (fallback)
+    github_webhook_url: str = "https://api.github.com"
+
+    # --- Infrastructure ----------------------------------------------------
+    database_url: str = (
+        "postgresql+asyncpg://postgres:postgres@localhost:5432/adaptive_review"
+    )
+    redis_url: str = "redis://localhost:6379/0"
+
+    # --- LLM ---------------------------------------------------------------
+    llm_provider: str = "openai"
+    llm_model_default: str = "gpt-4o-mini"
+    llm_embedding_model: str = "text-embedding-3-small"
+    openai_api_key: str = ""
+    anthropic_api_key: str = ""
+    llm_max_retries: int = 3
+    llm_timeout_seconds: float = 120.0
+
+    # --- Adaptive Review Utility Model --------------------------------------
+    arum_weights_version: str = "v1"
+    arum_temporal_decay_days: int = 90
+    arum_decay_lambda: float = 1.0
+
+    # --- Review budget (configurable caps) ----------------------------------
+    review_budget_low: int = 5
+    review_budget_medium: int = 10
+    review_budget_high: int = 20
+
+    # --- Queue -------------------------------------------------------------
+    celery_max_retries: int = 4
+    celery_retry_backoff_seconds: int = 30
+    celery_priority_redis_key: str = "adaptive_review:priority"
+
+    # --- Observability -------------------------------------------------------
+    langfuse_public_key: str = ""
+    langfuse_secret_key: str = ""
+    langfuse_host: str = ""
+    prometheus_enabled: bool = True
+
+    @model_validator(mode="after")
+    def enforce_production_secrets(self) -> Settings:
+        """Fail fast in production when required secrets are missing."""
+        if self.env != "production":
+            return self
+        missing = [
+            name
+            for name in ("secret_key", "github_webhook_secret")
+            if not getattr(self, name)
+        ]
+        if missing:
+            raise ValueError(
+                f"Missing required production settings: {', '.join(missing)}"
+            )
+        if "localhost" in self.database_url:
+            raise ValueError("DATABASE_URL must not target localhost in production")
+        return self
+
+
+@lru_cache(maxsize=1)
+def get_settings() -> Settings:
+    """Cached settings singleton."""
+    return Settings()
+
+
+settings = get_settings()
