@@ -38,6 +38,9 @@ class Settings(BaseSettings):
     )
     github_pat: str = ""  # alternative PAT (fallback)
     github_webhook_url: str = "https://api.github.com"
+    webhook_unknown_event_action: str = "reject"  # "reject" | "ignore"
+    rate_limit_webhook_per_minute: int = 120
+    rate_limit_webhook_repo_burst: int = 30
 
     # --- Infrastructure ----------------------------------------------------
     database_url: str = (
@@ -64,6 +67,17 @@ class Settings(BaseSettings):
     review_budget_low: int = 5
     review_budget_medium: int = 10
     review_budget_high: int = 20
+
+    # --- Priority scoring (docs/QUEUE.md §2) ---------------------------------
+    priority_scale: float = 10.0  # score = scale * weighted-factor-sum (0..scale)
+    priority_w_security: float = 0.30
+    priority_w_impact: float = 0.25
+    priority_w_history: float = 0.15
+    priority_w_component: float = 0.15
+    priority_w_dependency: float = 0.10
+    priority_w_urgency: float = 0.05
+    risk_low_threshold: float = 3.0  # score < low  -> risk LOW
+    risk_medium_threshold: float = 6.0  # score <= med -> risk MEDIUM, else HIGH
 
     # --- Queue -------------------------------------------------------------
     celery_max_retries: int = 4

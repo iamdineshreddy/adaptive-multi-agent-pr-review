@@ -9,7 +9,7 @@ pass.
 | 0 | Design & architecture docs (ARCHITECTURE, ARUM, DATABASE, API, QUEUE, AGENTS, RESEARCH, EXPERIMENTS, SECURITY) | **done** |
 | 1 | Requirements freeze; folder scaffold; config (`pydantic-settings`); workspace/dependency layout | **done** |
 | 2 | DB: SQLAlchemy models, asyncpg, Alembic migrations, pgvector, seed fixtures | **done** (schema + migrations + metadata tests; live-DB round-trip tests self-skip without PostgreSQL) |
-| 3 | GitHub webhook service: signature verify, Pydantic validation, idempotency, PR ingestion | todo |
+| 3 | GitHub webhook service: signature verify, Pydantic validation, idempotency, PR ingestion | **done** (`POST /api/v1/webhooks/github`, HMAC-SHA256/SHA1, rate limits, ping/unknown-event handling, SqlReviewIngester with delivery-id idempotency, priority scoring per QUEUE.md §2; dispatch is log-only until the Phase 4 broker — see below; 27 webhook tests + live-DB ingestion test that self-skips without PostgreSQL) |
 | 4 | Queue: Celery app, Redis broker, priority zset, queues, retries, dead-letter | todo |
 | 5 | Agents: security, quality, performance, architecture, standards — structured output, LLM provider abstraction | todo |
 | 6 | Supervisor + LangGraph orchestration: states/transitions, fan-out, retry/failure paths | todo |
@@ -30,6 +30,13 @@ pass.
 Phase gating rule: **no phase starts until the previous phase's tests pass.** When a
 phase cannot be completed as specified, it is split and documented (never silently
 cut).
+
+Phase 3 scope note (deliberate deferral): **FR-1.3 (GitHub API client fetching PR
+metadata, changed files, diffs, and commits)** is deliberately deferred to Phase 5,
+where the ingestion worker needs that data for analysis. The Phase 3 webhook only
+consumes what GitHub sends in the event payload; changed-file-driven priority
+factors (security, dependency, component) therefore stay at their documented 0.0
+baseline until then.
 
 ## Cross-cutting requirements (apply every phase)
 

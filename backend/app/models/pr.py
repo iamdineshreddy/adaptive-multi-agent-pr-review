@@ -13,6 +13,7 @@ from sqlalchemy import (
     ForeignKey,
     Integer,
     Numeric,
+    String,
     Text,
     UniqueConstraint,
     func,
@@ -120,6 +121,9 @@ class Review(Base):
             name="risk_class",
             values_callable=lambda cls: [m.value for m in cls],
         )
+    )
+    github_delivery_id: Mapped[str | None] = mapped_column(
+        String(64), unique=True, index=True
     )
     budget_cap: Mapped[int | None] = mapped_column(Integer)
     arum_version: Mapped[str | None] = mapped_column(Text)

@@ -28,14 +28,17 @@ Receives GitHub `pull_request` events (`opened`, `synchronize`,
 - Headers: `X-GitHub-Event`, `X-GitHub-Delivery`, `X-Hub-Signature-256`.
 - Signature verified (HMAC-SHA256) against the configured webhook secret.
 - Body validated against Pydantic schema; malformed → `422`.
-- Idempotent by `X-GitHub-Delivery`; duplicate delivery does not double-enqueue.
+- Idempotent by `X-GitHub-Delivery`; a duplicate delivery returns the same
+  `review_id` and does not create a second review run.
 
 Responses:
 - `202 Accepted` → `{ "review_id": "...", "delivery_id": "...", "queued": true }`
 - `400` invalid payload shape, `401` bad signature, `422` schema rejection,
   `429` rate limit.
 
-The endpoint performs **no AI work**; it enqueues and returns immediately.
+The endpoint performs **no AI work**: it persists the review run and returns before
+any analysis. The broker enqueue intent is recorded in structured logs until the
+Phase 4 queue lands (see `docs/ROADMAP.md`).
 
 ---
 

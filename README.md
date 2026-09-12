@@ -167,7 +167,7 @@ datasets/           Dataset registration and processing scripts
 
 ## Current status
 
-**Phase 2 complete — PostgreSQL persistence layer.**
+**Phase 3 complete — GitHub webhook service.**
 
 - Phase 0: full design documentation (`docs/`).
 - Phase 1: requirements frozen (`docs/REQUIREMENTS.md`), backend package installed
@@ -175,9 +175,15 @@ datasets/           Dataset registration and processing scripts
   `pydantic-settings` config layer with production secret guard, lint/mypy/tests green.
 - Phase 2: SQLAlchemy 2.0 async models for all 15 tables (`backend/app/models/`),
   async engine/session factory (`backend/app/database/`), Alembic migrations with
-  pgvector (offline SQL validated via `alembic upgrade head --sql`). 22 tests
-  collected: 20 pass (2 of these are live-DB integration round-trips that skip
-  cleanly until PostgreSQL is reachable), plus the pre-existing health/settings tests.
+  pgvector (offline SQL validated via `alembic upgrade head --sql`), delivery-id
+  idempotency column (`0002_github_delivery_id`). 22 tests: 20 pass (2 live-DB
+  round-trips self-skip until PostgreSQL is reachable), plus health/settings tests.
+- Phase 3: `POST /api/v1/webhooks/github` (`backend/app/webhooks/`) — HMAC-SHA256/SHA1
+  signature verification, Pydantic validation (422), rate limiting, delivery-id
+  idempotency, PR ingestion into PostgreSQL, and priority scoring per `docs/QUEUE.md`
+  §2. Dispatch is Honest log-only until the Phase 4 broker. 50 tests: 47 pass,
+  3 live-DB tests self-skip without PostgreSQL. FR-1.3 (GitHub API client) is
+  intentionally deferred to Phase 5 — see `docs/ROADMAP.md`.
 
 Remaining phases (3–19) are tracked in `docs/ROADMAP.md`. Features not yet implemented
 are NOT claimed.

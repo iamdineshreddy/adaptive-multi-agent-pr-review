@@ -16,6 +16,8 @@ from sqlalchemy.ext.asyncio import AsyncEngine, create_async_engine
 from app.config.settings import get_settings
 from app.database import SessionFactory, create_db_engine
 from app.models import Base, Repository, User
+from app.webhooks.ingest import IngestOutcome, SqlReviewIngester
+from app.webhooks.schemas import PullRequestWebhookEvent
 
 
 async def _require_db() -> None:
@@ -86,5 +88,63 @@ async def test_uuid_pk_defaults_populated() -> None:
                 .all()
             )
             assert set(users) == {"u1", "u2"}
+    finally:
+        await engine.dispose()
+
+
+async def _webhook_payload() -> dict:
+    return {
+        "action": "opened",
+        "number": 17,
+        "pull_request": {
+            "id": 9001,
+            "number": 17,
+            "title": "Integration PR",
+            "state": "open",
+            "user": {"login": "integration", "id": 1},
+            "base": {"ref": "main", "sha": "base-sha"},
+            "head": {"ref": "feature", "sha": "head-sha"},
+            "changed_files": 2,
+            "additions": 25,
+            "deletions": 3,
+        },
+        "repository": {
+            "id": 42424242,
+            "full_name": f"integration/ingest-{uuid.uuid4().hex[:8]}",
+            "default_branch": "main",
+            "language": "python",
+        },
+        "installation": {"id": 7},
+    }
+
+
+async def test_webhook_ingest_creates_review() -> None:
+    """SqlReviewIngester persists repo/PR and creates a queued review."""
+    await _require_db()
+    engine = create_db_engine()
+    try:
+        await _reset_schema(engine)
+        event = PullRequestWebhookEvent.model_validate(await _webhook_payload())
+        ingester = SqlReviewIngester(SessionFactory)
+        delivery = str(uuid.uuid4())
+
+        first = await ingester.ingest(event, delivery)
+        assert isinstance(first, IngestOutcome)
+        assert first.created is True
+        assert first.priority is not None
+        assert first.priority.score >= 0
+
+        duplicate = await ingester.ingest(event, delivery)
+        assert duplicate.created is False
+        assert duplicate.review_id == first.review_id
+
+        async with SessionFactory() as session:
+            count = (
+                await session.execute(
+                    text("SELECT COUNT(*) FROM reviews WHERE github_delivery_id = :d"),
+                    {"d": delivery},
+                )
+            ).scalar()
+            assert count == 1
     finally:
         await engine.dispose()
