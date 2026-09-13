@@ -201,6 +201,7 @@ class TestCeleryApp:
         assert QUEUES["pr_ingestion"] == "pr_ingestion_queue"
         assert TASK_ROUTES["queue.enqueue_review"]["queue"] == "pr_ingestion_queue"
         assert TASK_ROUTES["queue.pop_and_stage"]["queue"] == "default"
+        assert TASK_ROUTES["agents.run_agent"]["queue"] == "review_task_queue"
         assert set(QUEUES.values()) == {
             "pr_ingestion_queue",
             "review_task_queue",

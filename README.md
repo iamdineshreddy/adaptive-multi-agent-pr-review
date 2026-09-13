@@ -167,7 +167,7 @@ datasets/           Dataset registration and processing scripts
 
 ## Current status
 
-**Phase 4 complete — queue, priority scheduling, retries, dead-letter.**
+**Phase 5 complete — specialized review agents, structured output, LLM providers.**
 
 - Phase 0: full design documentation (`docs/`).
 - Phase 1: requirements frozen (`docs/REQUIREMENTS.md`), backend package installed
@@ -191,8 +191,19 @@ datasets/           Dataset registration and processing scripts
   `pr_ingestion_queue`. Scheduler pop-and-stage hands off to the Phase 6
   orchestrator. 66 tests: 60 pass (6 live-dependency tests self-skip without
   PostgreSQL/Redis).
+- Phase 5: Specialized review agents (`backend/app/agents/`) — a strict Pydantic
+  `AgentFinding` output contract with batch validation that drops-and-counts invalid
+  findings (`failed_results`), an `LLMProvider` abstraction (OpenAI / Anthropic /
+  mock) with bounded retry + fallback and per-call token/cost accounting, versioned
+  system prompts with injection defences (delimited data blocks, role audit,
+  instruction-marker neutralisation), unified-diff windowing per changed file, an
+  agent registry + `run_agent`, a prompt-injection evaluation harness, and the FR-1.3
+  GitHub REST client (`backend/app/github/`) with retryable/permanent error taxonomy
+  and scope building. `agents.run_agent` Celery task routes to `review_task_queue` as
+  the Phase 6 fan-out seam. 151 tests: 145 pass (6 live-dependency tests self-skip
+  without PostgreSQL/Redis).
 
-Remaining phases (3–19) are tracked in `docs/ROADMAP.md`. Features not yet implemented
+Remaining phases (6–19) are tracked in `docs/ROADMAP.md`. Features not yet implemented
 are NOT claimed.
 
 ---

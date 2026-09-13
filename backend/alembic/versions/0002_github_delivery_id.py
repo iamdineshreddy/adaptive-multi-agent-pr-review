@@ -12,6 +12,7 @@ database (docs/QUEUE.md §5), independent of the memory (Redis) idempotency cach
 from __future__ import annotations
 
 import sqlalchemy as sa
+
 from alembic import op
 
 revision = "0002_github_delivery_id"

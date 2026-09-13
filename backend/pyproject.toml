@@ -78,5 +78,5 @@ ignore_missing_imports = true
 [[tool.mypy.overrides]]
 # Celery's task decorator is untyped; the tasks are thin sync wrappers over
 # typed async cores (app.queue.tasks), which are the actual unit-tested surface.
-module = ["app.queue.tasks", "app.queue.celery_app"]
+module = ["app.queue.tasks", "app.queue.celery_app", "app.queue.agent_tasks"]
 disable_error_code = ["untyped-decorator", "no-untyped-def", "no-any-return"]

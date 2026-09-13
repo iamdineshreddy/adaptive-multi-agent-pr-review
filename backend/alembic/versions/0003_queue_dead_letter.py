@@ -12,8 +12,9 @@ durably recorded for the dashboard/alerting.
 from __future__ import annotations
 
 import sqlalchemy as sa
-from alembic import op
 from sqlalchemy.dialects.postgresql import UUID
+
+from alembic import op
 
 revision = "0003_queue_dead_letter"
 down_revision = "0002_github_delivery_id"
@@ -47,9 +48,7 @@ def upgrade() -> None:
             nullable=False,
         ),
     )
-    op.create_index(
-        "ix_dead_letters_review_id", "dead_letters", ["review_id"]
-    )
+    op.create_index("ix_dead_letters_review_id", "dead_letters", ["review_id"])
 
 
 def downgrade() -> None:
