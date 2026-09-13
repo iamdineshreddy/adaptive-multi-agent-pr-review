@@ -78,6 +78,12 @@ class Settings(BaseSettings):
     arum_gate_low_confidence: float = 0.3
     arum_gate_high_redundancy: float = 0.6
 
+    # --- ARUM memory + RAG (ARUM.md §2, FR-5.4) ------------------------------
+    # Repository relevance / context relevance are the best cosine among the top
+    # k pgvector hits (coded standards / resolved same-path findings).
+    arum_rag_top_k: int = 5
+    arum_rag_min_similarity: float = 0.0
+
     # --- Priority scoring (docs/QUEUE.md §2) ---------------------------------
     priority_scale: float = 10.0  # score = scale * weighted-factor-sum (0..scale)
     priority_w_security: float = 0.30

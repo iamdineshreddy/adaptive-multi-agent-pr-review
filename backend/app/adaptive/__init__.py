@@ -2,9 +2,11 @@
 
 Scored, deterministic finding selection: feature extraction → weighted utility →
 ranking → review budget + safety gates, plus the offline logistic/LightGBM
-training path and the reproducibility log. RAG-driven relevance and feedback
-memory feed ``repository_relevance`` / ``context_relevance`` / historical shares
-in Phases 10–12.
+training path and the reproducibility log. Phase 10 wires repository memory +
+RAG: decayed per-category accept/reject shares (``memory.py``) and
+pgvector retrieval of coded standards / resolved findings (``rag.py``) feed
+``historical_actionability`` / ``historical_rejection`` / ``repository_relevance`` /
+``context_relevance``.
 """
 
 from __future__ import annotations
@@ -22,6 +24,17 @@ from app.adaptive.features import (
     redundancy_term,
     repository_relevance,
     severity_score,
+)
+from app.adaptive.memory import (
+    FeedbackEvent,
+    aggregate_category_shares,
+    build_memory_snapshot,
+)
+from app.adaptive.rag import (
+    EmbeddingRow,
+    RagHit,
+    max_relevance,
+    top_k_similar,
 )
 from app.adaptive.reprolog import (
     DecisionTrace,
@@ -56,13 +69,18 @@ __all__ = [
     "DEFAULT_WEIGHTS_VERSION",
     "Decision",
     "DecisionTrace",
+    "EmbeddingRow",
     "FEATURE_NAMES",
+    "FeedbackEvent",
     "FileDecisionTrace",
     "MemoryDecisionTrace",
     "MlExtraUnavailableError",
+    "RagHit",
     "SelectionResult",
     "TrainingMatrix",
     "agent_agreement",
+    "aggregate_category_shares",
+    "build_memory_snapshot",
     "build_training_matrix",
     "compute_inputs_hash",
     "confidence_score",
@@ -77,12 +95,14 @@ __all__ = [
     "lightgbm_predict",
     "load_weights",
     "logistic_predict",
+    "max_relevance",
     "rank_decisions",
     "redundancy_term",
     "repository_relevance",
     "select_decisions",
     "severity_score",
     "split_train_eval",
+    "top_k_similar",
     "utility",
     "weighted_share",
 ]

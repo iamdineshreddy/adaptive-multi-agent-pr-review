@@ -12,12 +12,15 @@ from __future__ import annotations
 import uuid
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import Any, Protocol
 
+from sqlalchemy import select
 from sqlalchemy import text as sa_text
 from sqlalchemy import update as sa_update
 
+from app.adaptive.memory import FeedbackEvent
+from app.adaptive.rag import EmbeddingRow, RagHit, top_k_similar
 from app.adaptive.scoring import Decision
 from app.config.settings import get_settings
 from app.consolidation.datatypes import EmbeddingWrite, FindingGroupWrite, FindingWrite
@@ -26,12 +29,17 @@ from app.database import SessionFactory
 from app.models import (
     Agent,
     AgentMetric,
+    CodingStandard,
+    DeveloperFeedback,
+    Embedding,
     Finding,
     FindingGroup,
+    RepositoryMemory,
     Review,
     ReviewTask,
 )
 from app.models.enums import (
+    FeedbackOutcome,
     FindingStatus,
     ReviewStatus,
     RiskClass,
@@ -58,6 +66,38 @@ class TaskWrite:
 
 def utc_now() -> datetime:
     return datetime.now(UTC)
+
+
+def _embedding_row(
+    row: Mapping[str, Any], findings: Sequence[Mapping[str, Any]]
+) -> EmbeddingRow:
+    """Project an ``embeddings`` record into an :class:`EmbeddingRow`.
+
+    Finding-backed rows peek at their finding to expose ``file_path`` / status so
+    ``top_k_similar`` can restrict context relevance to the same path. Standard /
+    decision rows carry their text for traceability when it was stored.
+    """
+    file_path: str | None = None
+    status: str | None = None
+    finding_id = row.get("finding_id")
+    if finding_id is not None:
+        for finding in findings:
+            if str(finding.get("id")) == str(finding_id):
+                file_path = finding.get("file_path")
+                status = finding.get("publication_status")
+                break
+    return EmbeddingRow(
+        id=str(row.get("id", "")),
+        repository_id=str(row.get("repository_id", "")),
+        resource_type=str(row.get("resource_type", "finding")),
+        content_hash=str(row.get("content_hash", "")),
+        vector=tuple(row.get("vector") or ()),
+        model=str(row.get("model", "")),
+        finding_id=None if finding_id is None else str(finding_id),
+        file_path=file_path,
+        status=status,
+        content_text=row.get("content_text"),
+    )
 
 
 class OrchestratorStore(Protocol):
@@ -100,7 +140,7 @@ class OrchestratorStore(Protocol):
     ) -> None: ...
 
     async def create_embeddings(
-        self, review_id: object, rows: Sequence[EmbeddingWrite]
+        self, review_id: object | None, rows: Sequence[EmbeddingWrite]
     ) -> None: ...
 
     async def update_finding_duplicates(
@@ -123,6 +163,47 @@ class OrchestratorStore(Protocol):
 
     async def apply_decision(self, review_id: object, decision: Decision) -> None: ...
 
+    # --- Phase 10: repository memory + RAG -----------------------------------
+    async def get_repository_memory(
+        self, repository_id: object
+    ) -> dict[str, Any] | None: ...
+
+    async def upsert_repository_memory(
+        self,
+        repository_id: object,
+        snapshot: dict[str, Any],
+        decay_params: dict[str, Any],
+    ) -> int: ...
+
+    async def repository_feedback_events(
+        self,
+        repository_id: object,
+        *,
+        max_age_days: float,
+        now: datetime | None = None,
+    ) -> Sequence[FeedbackEvent]: ...
+
+    async def retrieve_rag(
+        self,
+        repository_id: object,
+        query_vector: Sequence[float],
+        *,
+        k: int,
+        similarity_threshold: float = 0.0,
+        resource_types: Sequence[str] | None = None,
+        file_path: str | None = None,
+        statuses: Sequence[str] | None = None,
+    ) -> Sequence[RagHit]: ...
+
+    async def active_standards(self, repository_id: object) -> list[dict[str, Any]]: ...
+
+    async def embedding_hashes(
+        self,
+        repository_id: object,
+        *,
+        resource_types: Sequence[str],
+    ) -> set[str]: ...
+
 
 class MemoryOrchestratorStore:
     """In-process, deterministic store for unit tests and local debugging."""
@@ -135,6 +216,9 @@ class MemoryOrchestratorStore:
         self.findings: list[dict[str, Any]] = []
         self.finding_groups: list[dict[str, Any]] = []
         self.embeddings: list[dict[str, Any]] = []
+        self.memory: dict[str, dict[str, Any]] = {}
+        self.feedback: list[dict[str, Any]] = []
+        self.standards: dict[str, list[dict[str, Any]]] = {}
 
     async def transition(
         self,
@@ -249,19 +333,20 @@ class MemoryOrchestratorStore:
         )
 
     async def create_embeddings(
-        self, review_id: object, rows: Sequence[EmbeddingWrite]
+        self, review_id: object | None, rows: Sequence[EmbeddingWrite]
     ) -> None:
         for row in rows:
             self.embeddings.append(
                 {
                     "id": str(uuid.uuid4()),
-                    "review_id": str(review_id),
+                    "review_id": None if review_id is None else str(review_id),
                     "repository_id": row.repository_id,
                     "finding_id": row.finding_id,
-                    "resource_type": "finding",
+                    "resource_type": row.resource_type,
                     "content_hash": row.content_hash,
                     "vector": list(row.vector),
                     "model": row.model,
+                    "content_text": row.content_text,
                 }
             )
 
@@ -323,6 +408,109 @@ class MemoryOrchestratorStore:
                 ):
                     row["publication_status"] = FindingStatus.SUPPRESSED.value
 
+    async def get_repository_memory(
+        self, repository_id: object
+    ) -> dict[str, Any] | None:
+        record = self.memory.get(str(repository_id))
+        return dict(record["snapshot"]) if record else None
+
+    async def upsert_repository_memory(
+        self,
+        repository_id: object,
+        snapshot: dict[str, Any],
+        decay_params: dict[str, Any],
+    ) -> int:
+        key = str(repository_id)
+        record = self.memory.setdefault(
+            key,
+            {
+                "snapshot": dict(snapshot),
+                "decay_params": dict(decay_params),
+                "version": 0,
+            },
+        )
+        record["snapshot"] = dict(snapshot)
+        record["decay_params"] = dict(decay_params)
+        record["version"] = int(record.get("version", 0)) + 1
+        return int(record["version"])
+
+    async def repository_feedback_events(
+        self,
+        repository_id: object,
+        *,
+        max_age_days: float,
+        now: datetime | None = None,
+    ) -> list[FeedbackEvent]:
+        now_ts = now or utc_now()
+        events: list[FeedbackEvent] = []
+        for row in self.feedback:
+            if str(row.get("repository_id")) != str(repository_id):
+                continue
+            created = row.get("created_at")
+            if created is None:
+                continue
+            created_ts = (
+                created
+                if isinstance(created, datetime)
+                else datetime.fromisoformat(created)
+            )
+            age_days = (now_ts - created_ts).total_seconds() / 86400.0
+            if age_days < 0.0 or age_days >= max_age_days:
+                continue
+            events.append(
+                FeedbackEvent(
+                    category=str(row.get("category", "")),
+                    outcome=FeedbackOutcome(row["outcome"]),
+                    age_days=age_days,
+                )
+            )
+        return events
+
+    async def retrieve_rag(
+        self,
+        repository_id: object,
+        query_vector: Sequence[float],
+        *,
+        k: int,
+        similarity_threshold: float = 0.0,
+        resource_types: Sequence[str] | None = None,
+        file_path: str | None = None,
+        statuses: Sequence[str] | None = None,
+    ) -> list[RagHit]:
+        rows = [
+            _embedding_row(row, self.findings)
+            for row in self.embeddings
+            if str(row.get("repository_id")) == str(repository_id)
+        ]
+        return top_k_similar(
+            query_vector,
+            rows,
+            k=k,
+            similarity_threshold=similarity_threshold,
+            resource_types=resource_types,
+            file_path=file_path,
+            statuses=statuses,
+        )
+
+    async def active_standards(self, repository_id: object) -> list[dict[str, Any]]:
+        return [
+            dict(standard) for standard in self.standards.get(str(repository_id), [])
+        ]
+
+    async def embedding_hashes(
+        self,
+        repository_id: object,
+        *,
+        resource_types: Sequence[str],
+    ) -> set[str]:
+        kinds = set(resource_types)
+        return {
+            str(row["content_hash"])
+            for row in self.embeddings
+            if str(row["repository_id"]) == str(repository_id)
+            and row["resource_type"] in kinds
+        }
+
 
 class SqlOrchestratorStore:
     """PostgreSQL implementation via SQLAlchemy (production path)."""
@@ -376,8 +564,6 @@ class SqlOrchestratorStore:
             review.supervisor_notes = notes
 
     async def sync_agents(self, rows: Sequence[Mapping[str, str]]) -> dict[str, str]:
-        from sqlalchemy import select
-
         ids: dict[str, str] = {}
         async with self._session_factory() as session, session.begin():
             for row in rows:
@@ -488,12 +674,14 @@ class SqlOrchestratorStore:
             )
 
     async def create_embeddings(
-        self, review_id: object, rows: Sequence[EmbeddingWrite]
+        self, review_id: object | None, rows: Sequence[EmbeddingWrite]
     ) -> None:
         # The vector is written as a pgvector text literal cast server-side. This
         # deliberately avoids the pgvector asyncpg codec (registered in Phase 14,
         # see ``app.database``); the floats are provider-produced, so interpolating
-        # them is safe and keeps the SQL store fully unit-testable offline.
+        # them is safe and keeps the SQL store fully unit-testable offline. The
+        # (resource_type, content_hash) unique constraint dedupes Phase 10 RAG
+        # standard embeddings on re-sync.
         async with self._session_factory() as session, session.begin():
             for row in rows:
                 vector_cast = f"'{vector_sql_literal(row.vector)}'::vector"
@@ -501,14 +689,20 @@ class SqlOrchestratorStore:
                     "INSERT INTO embeddings "
                     "(id, repository_id, finding_id, resource_type, content_hash, "
                     "vector, model) VALUES (:id, :repository_id, :finding_id, "
-                    " 'finding', :content_hash, " + vector_cast + ", :model)"
+                    ":resource_type, :content_hash, " + vector_cast + ", :model)"
+                    " ON CONFLICT (resource_type, content_hash) DO NOTHING"
                 )
                 await session.execute(
                     statement,
                     {
                         "id": uuid.uuid4(),
                         "repository_id": uuid.UUID(row.repository_id),
-                        "finding_id": uuid.UUID(row.finding_id),
+                        "finding_id": (
+                            None
+                            if row.finding_id is None
+                            else uuid.UUID(row.finding_id)
+                        ),
+                        "resource_type": row.resource_type,
                         "content_hash": row.content_hash,
                         "model": row.model,
                     },
@@ -583,6 +777,162 @@ class SqlOrchestratorStore:
                     )
                     .values(publication_status=FindingStatus.SUPPRESSED)
                 )
+
+    async def get_repository_memory(
+        self, repository_id: object
+    ) -> dict[str, Any] | None:
+        rid = uuid.UUID(str(repository_id))
+        async with self._session_factory() as session:
+            row = await session.scalar(
+                select(RepositoryMemory).where(RepositoryMemory.repository_id == rid)
+            )
+            return dict(row.snapshot) if row is not None else None
+
+    async def upsert_repository_memory(
+        self,
+        repository_id: object,
+        snapshot: dict[str, Any],
+        decay_params: dict[str, Any],
+    ) -> int:
+        rid = uuid.UUID(str(repository_id))
+        async with self._session_factory() as session, session.begin():
+            row = await session.scalar(
+                select(RepositoryMemory).where(RepositoryMemory.repository_id == rid)
+            )
+            if row is None:
+                row = RepositoryMemory(
+                    repository_id=rid,
+                    snapshot=dict(snapshot),
+                    decay_params=dict(decay_params),
+                    version=1,
+                )
+                session.add(row)
+            else:
+                row.snapshot = dict(snapshot)
+                row.decay_params = dict(decay_params)
+                row.version = int(row.version or 0) + 1
+            await session.flush()
+            return int(row.version)
+
+    async def repository_feedback_events(
+        self,
+        repository_id: object,
+        *,
+        max_age_days: float,
+        now: datetime | None = None,
+    ) -> list[FeedbackEvent]:
+        rid = uuid.UUID(str(repository_id))
+        now_ts = now or utc_now()
+        threshold = now_ts - timedelta(days=max_age_days)
+        events: list[FeedbackEvent] = []
+        async with self._session_factory() as session:
+            rows = await session.execute(
+                select(DeveloperFeedback, Finding.category)
+                .join(Finding, DeveloperFeedback.finding_id == Finding.id)
+                .where(
+                    DeveloperFeedback.repository_id == rid,
+                    DeveloperFeedback.created_at >= threshold,
+                )
+            )
+            for feedback, category in rows:
+                age_days = (now_ts - feedback.created_at).total_seconds() / 86400.0
+                events.append(
+                    FeedbackEvent(
+                        category=category or "",
+                        outcome=feedback.outcome,
+                        age_days=age_days,
+                    )
+                )
+        return events
+
+    async def retrieve_rag(
+        self,
+        repository_id: object,
+        query_vector: Sequence[float],
+        *,
+        k: int,
+        similarity_threshold: float = 0.0,
+        resource_types: Sequence[str] | None = None,
+        file_path: str | None = None,
+        statuses: Sequence[str] | None = None,
+    ) -> list[RagHit]:
+        rid = uuid.UUID(str(repository_id))
+        kinds = resource_types or ("finding", "standard", "decision", "comment")
+        kind_sql = ", ".join(f"'{kind.replace(chr(39), '')}'" for kind in kinds)
+        query_literal = vector_sql_literal(query_vector)
+        cosine_expr = f"1.0 - (e.vector <=> '{query_literal}'::vector)"
+        status_filter = ""
+        if statuses:
+            status_sql = ", ".join(
+                f"'{status.replace(chr(39), '')}'" for status in statuses
+            )
+            status_filter = f"AND f.publication_status IN ({status_sql}) "
+        file_filter = "AND f.file_path = :file_path " if file_path else ""
+        statement = sa_text(
+            f"SELECT e.finding_id, e.resource_type, {cosine_expr} AS cosine "
+            "FROM embeddings e "
+            "LEFT JOIN findings f ON f.id = e.finding_id "
+            "WHERE e.repository_id = :repository_id "
+            f"AND e.resource_type IN ({kind_sql}) "
+            f"{file_filter}{status_filter} "
+            f"AND {cosine_expr} >= :min_similarity "
+            "ORDER BY cosine DESC "
+            "LIMIT :k"
+        )
+        params: dict[str, Any] = {
+            "repository_id": rid,
+            "min_similarity": similarity_threshold,
+            "k": k,
+        }
+        if file_path:
+            params["file_path"] = file_path
+        hits: list[RagHit] = []
+        async with self._session_factory() as session:
+            rows = await session.execute(statement, params)
+            for finding_id, resource_type, cosine in rows:
+                hits.append(
+                    RagHit(
+                        repository_id=str(repository_id),
+                        resource_type=resource_type,
+                        cosine=cosine,
+                        finding_id=None if finding_id is None else str(finding_id),
+                    )
+                )
+        return hits
+
+    async def active_standards(self, repository_id: object) -> list[dict[str, Any]]:
+        rid = uuid.UUID(str(repository_id))
+        async with self._session_factory() as session:
+            standards = await session.scalars(
+                select(CodingStandard).where(
+                    CodingStandard.repository_id == rid,
+                    CodingStandard.is_active.is_(True),
+                )
+            )
+            return [
+                {
+                    "rule_key": standard.rule_key,
+                    "description": standard.description,
+                    "enforcement_level": standard.enforcement_level,
+                }
+                for standard in standards
+            ]
+
+    async def embedding_hashes(
+        self,
+        repository_id: object,
+        *,
+        resource_types: Sequence[str],
+    ) -> set[str]:
+        rid = uuid.UUID(str(repository_id))
+        async with self._session_factory() as session:
+            hashes = await session.scalars(
+                select(Embedding.content_hash).where(
+                    Embedding.repository_id == rid,
+                    Embedding.resource_type.in_(set(resource_types)),
+                )
+            )
+            return set(hashes)
 
     @staticmethod
     def _int(value: object) -> int:

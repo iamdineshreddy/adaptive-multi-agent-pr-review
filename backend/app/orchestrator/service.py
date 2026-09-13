@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import time
 import uuid
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import Any
@@ -30,6 +31,8 @@ from app.adaptive import (
     utility,
 )
 from app.adaptive.features import ArumFeatures
+from app.adaptive.memory import build_memory_snapshot
+from app.adaptive.rag import max_relevance
 from app.adaptive.weights import ArumWeights
 from app.agents.contract import AgentScope, scope_validation_error
 from app.agents.registry import agent_metadata, queue_for_agent
@@ -37,9 +40,15 @@ from app.config.settings import Settings, get_settings
 from app.consolidation import (
     build_embeddings_provider,
     consolidate_review,
+    content_hash,
+    embedding_text,
     normalise_findings,
 )
-from app.consolidation.datatypes import ConsolidationSummary, FindingWrite
+from app.consolidation.datatypes import (
+    ConsolidationSummary,
+    EmbeddingWrite,
+    FindingWrite,
+)
 from app.consolidation.embeddings import EmbeddingsProvider
 from app.models.enums import ReviewStatus, RiskClass, TaskStatus
 from app.orchestrator.graph import build_orchestration_graph
@@ -312,7 +321,19 @@ async def _decide_findings(
     """
     try:
         weights = load_weights(version=ctx.settings.arum_weights_version)
-        decisions = _score_candidates(review_id, summary, weights)
+        repository_id = summary.findings[0].repository_id if summary.findings else None
+        snapshot = (
+            await _refresh_repository_memory(ctx, repository_id)
+            if repository_id
+            else None
+        )
+        provider = build_embeddings_provider(ctx.settings)
+        if repository_id:
+            await _sync_repository_context(ctx, repository_id, provider)
+        memories = await _candidate_memories(
+            ctx, summary, snapshot, provider, repository_id=repository_id
+        )
+        decisions = _score_candidates(review_id, summary, weights, memories)
         ranked = rank_decisions(decisions)
         risk_class = await ctx.store.review_risk_class(review_id)
         cap = _budget_cap(risk_class, ctx.settings)
@@ -350,6 +371,12 @@ async def _decide_findings(
                 " risk_class metadata missing on the review; "
                 "used the high cap rather than truncating a valid selection."
             )
+        if repository_id is not None and snapshot is None:
+            note += (
+                " no repository memory yet — historical actionability/rejection "
+                "and RAG relevance scored as 0.0 (cold start); the memory "
+                "worker rebuilds from developer feedback."
+            )
         await ctx.store.append_note(review_id, note)
         return None
     except Exception as exc:  # noqa: BLE001 - any decision failure must surface
@@ -365,16 +392,172 @@ def _budget_cap(risk_class: RiskClass | None, cfg: Settings) -> int:
     return cfg.review_budget_high  # HIGH, and unknown/missing -> most permissive
 
 
+async def _refresh_repository_memory(
+    ctx: RunContext, repository_id: str
+) -> dict[str, Any] | None:
+    """Load the decayed memory snapshot, building it lazily on first contact.
+
+    The snapshot aggregates ``developer_feedback`` (Phase 10: ARUM.md §2/§6; the
+    Phase 11 worker is the dedicated writer). With no evidence yet it stays
+    ``None`` so the cold-start note is honest and the next review retries.
+    """
+    snapshot = await ctx.store.get_repository_memory(repository_id)
+    if snapshot is not None:
+        return snapshot
+    tau = ctx.settings.arum_temporal_decay_days
+    lam = ctx.settings.arum_decay_lambda
+    events = await ctx.store.repository_feedback_events(
+        repository_id, max_age_days=3.0 * tau
+    )
+    if not events:
+        return None
+    built = build_memory_snapshot(events, tau_days=tau, lam=lam)
+    await ctx.store.upsert_repository_memory(
+        repository_id, built, decay_params=built["decay_params"]
+    )
+    return built
+
+
+async def _sync_repository_context(
+    ctx: RunContext, repository_id: str, provider: EmbeddingsProvider
+) -> None:
+    """Embed the repository's active coding standards for RAG (FR-5.4).
+
+    Dedupe by ``(resource_type, content_hash)`` so a re-sync does not re-embed
+    standards already in vector storage; the embeddings table's unique
+    constraint makes the write idempotent on the SQL path too.
+    """
+    standards = await ctx.store.active_standards(repository_id)
+    if not standards:
+        return
+    existing = await ctx.store.embedding_hashes(
+        repository_id, resource_types=("standard",)
+    )
+    missing = [
+        standard
+        for standard in standards
+        if content_hash(_standard_text(standard)) not in existing
+    ]
+    if not missing:
+        return
+    texts = [_standard_text(standard) for standard in missing]
+    vectors = await provider.embed_texts(texts)
+    rows = [
+        EmbeddingWrite(
+            finding_id=None,
+            repository_id=str(repository_id),
+            content_hash=content_hash(text),
+            vector=vector,
+            model=provider.model,
+            resource_type="standard",
+            content_text=text,
+        )
+        for text, vector in zip(texts, vectors, strict=True)
+    ]
+    await ctx.store.create_embeddings(None, rows)
+
+
+def _standard_text(standard: Mapping[str, Any]) -> str:
+    """The deterministic string embedded for a coded standard (RAG indexing)."""
+    return f"{standard.get('rule_key', '')} | {standard.get('description', '')}"
+
+
+async def _candidate_memories(
+    ctx: RunContext,
+    summary: ConsolidationSummary,
+    snapshot: Mapping[str, Any] | None,
+    provider: EmbeddingsProvider,
+    *,
+    repository_id: str | None,
+) -> dict[str, CandidateMemory]:
+    """RAG relevance + cached shares for every candidate (ARUM.md §2).
+
+    Each candidate's representative is embedded once and retrieved twice:
+    repository relevance against the repo's coded standards, context relevance
+    against previously *resolved* findings in the same file path (re-raising an
+    already-closed issue is penalised unless new evidence shows up). Both float
+    in ``[0, 1]`` so ``extract_features`` can consume them directly.
+    """
+    representatives: dict[str, FindingWrite] = {}
+    for group in summary.groups:
+        members = [row for row in summary.findings if row.duplicate_group == group.id]
+        if not members:
+            raise RuntimeError(f"redundancy group {group.id} has no persisted members")
+        representative = next(
+            (row for row in members if row.id == group.representative_finding_id),
+            members[0],
+        )
+        representatives[representative.id] = representative
+    for row in summary.findings:
+        if row.duplicate_group is None:
+            representatives[row.id] = row
+    if not representatives:
+        return {}
+
+    texts = {
+        finding_id: embedding_text(finding)
+        for finding_id, finding in representatives.items()
+    }
+    vectors = await provider.embed_texts([texts[finding_id] for finding_id in texts])
+    k = ctx.settings.arum_rag_top_k
+    min_similarity = ctx.settings.arum_rag_min_similarity
+    memories: dict[str, CandidateMemory] = {}
+    for finding_id, vector in zip(texts, vectors, strict=True):
+        repo_hits = await ctx.store.retrieve_rag(
+            repository_id=repository_id,
+            query_vector=vector,
+            k=k,
+            similarity_threshold=min_similarity,
+            resource_types=("standard",),
+        )
+        context_hits = await ctx.store.retrieve_rag(
+            repository_id=repository_id,
+            query_vector=vector,
+            k=k,
+            similarity_threshold=min_similarity,
+            resource_types=("finding",),
+            file_path=representatives[finding_id].file_path,
+            statuses=("RESOLVED",),
+        )
+        memories[finding_id] = CandidateMemory(
+            snapshot=snapshot,
+            repository_relevance=max_relevance(repo_hits),
+            context_relevance=max_relevance(context_hits),
+        )
+    return memories
+
+
+@dataclass(frozen=True)
+class CandidateMemory:
+    """Memory + RAG inputs gathered for one candidate (ARUM.md §2)."""
+
+    snapshot: Mapping[str, Any] | None
+    repository_relevance: float
+    context_relevance: float
+
+    def feature_memory(self) -> dict[str, object]:
+        """The mapping ``features.extract_features`` reads per candidate."""
+        return {
+            "categories": (self.snapshot or {}).get("categories") or {},
+            "repository_relevance": self.repository_relevance,
+            "context_relevance": self.context_relevance,
+        }
+
+
 def _score_candidates(
     review_id: str,
     summary: ConsolidationSummary,
     weights: ArumWeights,
+    memories: Mapping[str, CandidateMemory] | None = None,
 ) -> list[Decision]:
     """Build one :class:`Decision` per candidate from the merged summary.
 
     Singletons are scored alone (member_count 1); grouped findings use the
     redundancy group's member set for agent agreement + disagreement variance.
+    ``memories`` (Phase 10) feeds the four memory/RAG features; verified
+    candidates without an entry keep the documented zeros.
     """
+    memories = memories or {}
     decisions: list[Decision] = []
     for group in summary.groups:
         members = [row for row in summary.findings if row.duplicate_group == group.id]
@@ -386,19 +569,26 @@ def _score_candidates(
         )
         distinct_agents = len({row.agent_key for row in members})
         variance = disagreement_variance(members)
+        candidate = memories.get(representative.id)
         features = extract_features(
             representative,
             member_count=group.member_count,
             distinct_agents=distinct_agents,
             variance=variance,
+            memory=None if candidate is None else candidate.feature_memory(),
         )
         decisions.append(
             _decision(review_id, representative, group.id, features, weights)
         )
     for row in summary.findings:
         if row.duplicate_group is None:
+            candidate = memories.get(row.id)
             features = extract_features(
-                row, member_count=1, distinct_agents=1, variance=0.0
+                row,
+                member_count=1,
+                distinct_agents=1,
+                variance=0.0,
+                memory=None if candidate is None else candidate.feature_memory(),
             )
             decisions.append(_decision(review_id, row, None, features, weights))
     return decisions

@@ -167,7 +167,7 @@ datasets/           Dataset registration and processing scripts
 
 ## Current status
 
-**Phase 9 complete — ARUM budget controller + safety gates; reviews resolve a per-review publication budget and gate/truncate selections on the `DECIDING` checkpoint. Publication happens in the phase that actually publishes.**
+**Phase 10 complete — repository memory + RAG + temporal decay; the four previously-zeroed ARUM features (`historical_actionability`, `historical_rejection`, `repository_relevance`, `context_relevance`) now score from developer-feedback memory and pgvector retrieval of standards/resolved findings. Publication happens in the phase that actually publishes.**
 
 - Phase 0: full design documentation (`docs/`).
 - Phase 1: requirements frozen (`docs/REQUIREMENTS.md`), backend package installed
@@ -263,8 +263,22 @@ datasets/           Dataset registration and processing scripts
   New config: `arum_gate_high_confidence`, `arum_gate_low_confidence`,
   `arum_gate_high_redundancy`. 306 tests: 297 pass (9 live-dependency tests self-skip
   without PostgreSQL/Redis).
+- Phase 10: repository memory + RAG + temporal decay (`backend/app/adaptive/memory.py`,
+  `backend/app/adaptive/rag.py`). Developer feedback (`developer_feedback`) aggregates
+  into the cached `repository_memory.snapshot`: decayed per-category
+  `accepted_share`/`rejected_share` (ACCEPTED/FIXED = actionability, REJECTED/DISMISSED =
+  rejection; exp decay with `arum_temporal_decay_days` tau, 3·tau horizon, events counted
+  at exact category + parent prefix). RAG embeds active coding standards and resolves
+  context from previously *resolved* same-path findings: each candidate's representative
+  is embedded once and retrieved twice (repository relevance, context relevance) with a
+  store-agnostic `top_k_similar` core. The orchestrator builds the snapshot lazily,
+  syncs standards idempotently (`ON CONFLICT (resource_type, content_hash)`), and feeds
+  all four previously-zeroed memory/RAG features into ARUM scoring — a true cold start
+  stays honest with 0.0 features and an explanatory supervisor note. New config:
+  `arum_rag_top_k`, `arum_rag_min_similarity`. 325 tests: 316 pass (9 live-dependency
+  tests self-skip without PostgreSQL/Redis).
 
-Remaining phases (10–19) are tracked in `docs/ROADMAP.md`. Features not yet implemented
+Remaining phases (11–19) are tracked in `docs/ROADMAP.md`. Features not yet implemented
 are NOT claimed.
 
 ---

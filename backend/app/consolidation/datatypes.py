@@ -54,13 +54,21 @@ class FindingGroupWrite:
 
 @dataclass(frozen=True)
 class EmbeddingWrite:
-    """One embedding row persisting to ``embeddings`` (resource_type 'finding')."""
+    """One embedding row persisting to ``embeddings``.
 
-    finding_id: str
+    ``resource_type`` is ``finding`` for candidate findings; Phase 10 RAG writes
+    ``standard`` / ``decision`` embeddings with ``content_text`` kept for
+    traceability (docs/ARUM.md §2, docs/DATABASE.md §3.13). ``finding_id`` is
+    null for standards/decisions.
+    """
+
+    finding_id: str | None
     repository_id: str
     content_hash: str
     vector: tuple[float, ...]
     model: str
+    resource_type: str = "finding"
+    content_text: str | None = None
 
 
 @dataclass(frozen=True)

@@ -18,6 +18,8 @@ import pytest
 from app.adaptive import MemoryDecisionTrace
 from app.agents.contract import AgentScope, ChangeKind, FileSlice
 from app.config.settings import Settings
+from app.consolidation.datatypes import FindingWrite
+from app.consolidation.embeddings import MockEmbeddingsProvider
 from app.models.enums import ReviewStatus, RiskClass
 from app.orchestrator.persistence import MemoryOrchestratorStore
 from app.orchestrator.runners import RunnerResult
@@ -255,3 +257,163 @@ async def test_budget_cap_truncates_after_rank(
     notes = record["supervisor_notes"]
     assert any("ARUM selected 5 of 6" in n for n in notes)
     assert any("budget-truncated" in n for n in notes)
+
+
+def _probe_finding_write() -> FindingWrite:
+    """The persisted shape of the ``_finding()`` representative (Phase 10)."""
+    return FindingWrite(
+        id="probe",
+        agent_key="security",
+        agent_id="security-agent",
+        review_id=str(REVIEW_ID),
+        repository_id=str(REPO_ID),
+        file_path="app/auth.py",
+        line_start=None,
+        line_end=None,
+        category="security/xss",
+        severity="HIGH",
+        confidence=0.9,
+        title="XSS risk in login view",
+        description="User-controlled input is rendered unescaped.",
+        evidence={},
+        suggested_fix=None,
+        reason_summary="Evidence-only summary.",
+    )
+
+
+def _candidate_embedding_vector() -> tuple[float, ...]:
+    """The mock embedding for the ``_finding`` representative (Phase 10)."""
+    from app.consolidation.similarity import embedding_text
+
+    return tuple(
+        MockEmbeddingsProvider()._vector(embedding_text(_probe_finding_write()))
+    )
+
+
+def _seed_repository_evidence(store: MemoryOrchestratorStore) -> None:
+    """A repository that already decided the same concern before (Phase 10).
+
+    Pre-embeds a resolved same-path finding (context relevance) and a coded
+    standard on the candidate's semantic content (repository relevance) plus a
+    decayed snapshot whose author followed the fix.
+    """
+    from app.consolidation.similarity import embedding_text
+
+    vector = list(_candidate_embedding_vector())
+    text = embedding_text(_probe_finding_write())
+    store.memory[str(REPO_ID)] = {
+        "snapshot": {
+            "categories": {
+                "security/xss": {"accepted_share": 0.75, "rejected_share": 0.1}
+            },
+            "decay_params": {"tau_days": 90.0, "lambda": 1.0, "horizon_days": 270.0},
+            "events_count": 12,
+        },
+        "decay_params": {"tau_days": 90.0, "lambda": 1.0, "horizon_days": 270.0},
+        "version": 1,
+    }
+    store.findings.append(
+        {
+            "id": "past-finding",
+            "review_id": "other-review",
+            "repository_id": str(REPO_ID),
+            "file_path": "app/auth.py",
+            "publication_status": "RESOLVED",
+        }
+    )
+    store.embeddings.append(
+        {
+            "id": "emb-past",
+            "review_id": "other-review",
+            "repository_id": str(REPO_ID),
+            "finding_id": "past-finding",
+            "resource_type": "finding",
+            "content_hash": "past-hash",
+            "vector": vector,
+            "model": "mock/text-embedding",
+            "content_text": text,
+        }
+    )
+    store.embeddings.append(
+        {
+            "id": "emb-standard",
+            "review_id": None,
+            "repository_id": str(REPO_ID),
+            "finding_id": None,
+            "resource_type": "standard",
+            "content_hash": "std-hash",
+            "vector": vector,
+            "model": "mock/text-embedding",
+            "content_text": text,
+        }
+    )
+    store.standards[str(REPO_ID)] = [
+        {
+            "repository_id": str(REPO_ID),
+            "rule_key": "auth-zxcvbn",
+            "description": "Enforce password strength on login.",
+            "enforcement_level": "required",
+            "is_active": True,
+        }
+    ]
+
+
+async def test_memory_and_rag_feed_all_four_features(
+    valid_scope: AgentScope, settings: Settings
+) -> None:
+    runner = ScriptedRunner(
+        {"security": [_success("security", findings=(_finding(),))]}
+    )
+    store = MemoryOrchestratorStore()
+    _seed_repository_evidence(store)
+    trace = MemoryDecisionTrace()
+    await run_review(
+        valid_scope, runner=runner, store=store, settings=settings, trace=trace
+    )
+
+    scored = next(row for row in store.findings if "arum_features" in row)
+    features = scored["arum_features"]
+    # Snapshot shares reach historical features untouched.
+    assert features["historical_actionability"] == pytest.approx(0.75)
+    assert features["historical_rejection"] == pytest.approx(0.1)
+    # The candidate is semantically identical to the resolved finding + standard.
+    assert features["repository_relevance"] == pytest.approx(1.0)
+    assert features["context_relevance"] == pytest.approx(1.0)
+    # The context hit is the *resolved* finding, re-fashioning into a selection.
+    assert scored["publication_status"] == "SCHEDULED"
+
+    # _sync_repository_context embedded the one active standard that was missing.
+    synced = [
+        row
+        for row in store.embeddings
+        if row["resource_type"] == "standard"
+        and row["content_text"] == "auth-zxcvbn | Enforce password strength on login."
+    ]
+    assert len(synced) == 1
+
+    record = store.reviews[str(REVIEW_ID)]
+    assert all("no repository memory yet" not in n for n in record["supervisor_notes"])
+
+
+async def test_cold_start_scores_memory_features_zero_with_note(
+    valid_scope: AgentScope, settings: Settings
+) -> None:
+    runner = ScriptedRunner(
+        {"security": [_success("security", findings=(_finding(),))]}
+    )
+    store = MemoryOrchestratorStore()
+    trace = MemoryDecisionTrace()
+    await run_review(
+        valid_scope, runner=runner, store=store, settings=settings, trace=trace
+    )
+
+    scored = next(row for row in store.findings if "arum_features" in row)
+    features = scored["arum_features"]
+    assert features["historical_actionability"] == 0.0
+    assert features["historical_rejection"] == 0.0
+    assert features["repository_relevance"] == 0.0
+    assert features["context_relevance"] == 0.0
+
+    notes = store.reviews[str(REVIEW_ID)]["supervisor_notes"]
+    assert any("no repository memory yet" in n for n in notes)
+    assert store.memory == {}  # no evidence -> snapshot stays absent
