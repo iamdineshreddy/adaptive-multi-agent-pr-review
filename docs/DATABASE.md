@@ -246,6 +246,7 @@ Per-repo adaptive aggregates (denormalised for read speed; rebuilt on feedback).
 | snapshot | jsonb | rolling metrics: category→accept/reject shares (decayed), component→findings, strictness, common aliases |
 | decay_params | jsonb | τ, λ |
 | arum_weights | jsonb null | repo-level weight overrides |
+| learned_weights | jsonb null | Phase 11: fitted **candidate** weight sets (in-sample evaluated, versioned, never auto-promoted — ARUM.md §4, NFR-5.1) |
 | updated_at | timestamptz | |
 | version | int | monotonic rebuild counter |
 

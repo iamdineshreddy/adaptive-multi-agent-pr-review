@@ -41,6 +41,7 @@ class Settings(BaseSettings):
     webhook_unknown_event_action: str = "reject"  # "reject" | "ignore"
     rate_limit_webhook_per_minute: int = 120
     rate_limit_webhook_repo_burst: int = 30
+    rate_limit_feedback_per_minute: int = 120
 
     # --- Infrastructure ----------------------------------------------------
     database_url: str = (
@@ -83,6 +84,12 @@ class Settings(BaseSettings):
     # k pgvector hits (coded standards / resolved same-path findings).
     arum_rag_top_k: int = 5
     arum_rag_min_similarity: float = 0.0
+
+    # --- ARUM weight learning (ARUM.md §4, FR-5, Phase 11) --------------------
+    # Candidates are never trained on fewer labelled decisions than this (the
+    # learner returns None instead of a noisy model), and are never promoted
+    # into active scoring automatically (NFR-5.1).
+    learning_min_examples: int = 20
 
     # --- Priority scoring (docs/QUEUE.md §2) ---------------------------------
     priority_scale: float = 10.0  # score = scale * weighted-factor-sum (0..scale)

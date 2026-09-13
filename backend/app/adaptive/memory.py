@@ -33,11 +33,16 @@ REJECTED_OUTCOMES: frozenset[FeedbackOutcome] = frozenset(
 
 @dataclass(frozen=True)
 class FeedbackEvent:
-    """One developer-feedback signal relevant to the memory snapshot."""
+    """One developer-feedback signal relevant to the memory snapshot.
+
+    ``finding_id`` lets the Phase 11 learning loop join events back to the
+    decision trace; it is ``None`` for repo-level feedback without a finding.
+    """
 
     category: str
     outcome: FeedbackOutcome
     age_days: float
+    finding_id: str | None = None
 
 
 def event_positive(event: FeedbackEvent, outcomes: frozenset[FeedbackOutcome]) -> bool:

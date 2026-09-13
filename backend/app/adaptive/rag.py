@@ -67,9 +67,7 @@ def top_k_similar(
     top ``k`` in deterministic order (cosine desc, then ``(finding_id, content_text)``).
     """
     kinds = (
-        set(resource_types)
-        if resource_types is not None
-        else set(RAG_RESOURCE_KINDS)
+        set(resource_types) if resource_types is not None else set(RAG_RESOURCE_KINDS)
     )
     wanted_statuses = set(statuses) if statuses is not None else None
     scored: list[RagHit] = []

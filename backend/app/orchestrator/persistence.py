@@ -19,6 +19,7 @@ from sqlalchemy import select
 from sqlalchemy import text as sa_text
 from sqlalchemy import update as sa_update
 
+from app.adaptive.feedback import FeedbackWrite, feedback_identity
 from app.adaptive.memory import FeedbackEvent
 from app.adaptive.rag import EmbeddingRow, RagHit, top_k_similar
 from app.adaptive.scoring import Decision
@@ -203,6 +204,21 @@ class OrchestratorStore(Protocol):
         *,
         resource_types: Sequence[str],
     ) -> set[str]: ...
+
+    # --- Phase 11: developer feedback + weight learning ----------------------
+    async def create_feedback(self, feedback: FeedbackWrite) -> str: ...
+
+    async def resolve_feedback_finding(
+        self, review_id: object, finding_id: object
+    ) -> tuple[str, str] | None: ...
+
+    async def save_weight_candidate(
+        self, repository_id: object, candidate: dict[str, Any]
+    ) -> None: ...
+
+    async def repository_learned_weights(
+        self, repository_id: object
+    ) -> dict[str, Any] | None: ...
 
 
 class MemoryOrchestratorStore:
@@ -462,6 +478,9 @@ class MemoryOrchestratorStore:
                     category=str(row.get("category", "")),
                     outcome=FeedbackOutcome(row["outcome"]),
                     age_days=age_days,
+                    finding_id=(
+                        str(row["finding_id"]) if row.get("finding_id") else None
+                    ),
                 )
             )
         return events
@@ -510,6 +529,46 @@ class MemoryOrchestratorStore:
             if str(row["repository_id"]) == str(repository_id)
             and row["resource_type"] in kinds
         }
+
+    async def create_feedback(self, feedback: FeedbackWrite) -> str:
+        feedback_id = feedback_identity(feedback)
+        existing = next(
+            (row for row in self.feedback if row.get("id") == feedback_id), None
+        )
+        if existing is None:
+            self.feedback.append(feedback.to_row(feedback_id, utc_now().isoformat()))
+        return feedback_id
+
+    async def resolve_feedback_finding(
+        self, review_id: object, finding_id: object
+    ) -> tuple[str, str] | None:
+        rid = str(review_id)
+        fid = str(finding_id)
+        for row in self.findings:
+            if row["id"] == fid and str(row.get("review_id")) == rid:
+                return (
+                    str(row["repository_id"]),
+                    str(row.get("category", "")),
+                )
+        return None
+
+    async def save_weight_candidate(
+        self, repository_id: object, candidate: dict[str, Any]
+    ) -> None:
+        key = str(repository_id)
+        record = self.memory.setdefault(
+            key, {"snapshot": {}, "decay_params": {}, "version": 0}
+        )
+        record["learned_weights"] = dict(candidate)
+
+    async def repository_learned_weights(
+        self, repository_id: object
+    ) -> dict[str, Any] | None:
+        record = self.memory.get(str(repository_id))
+        if not record or "learned_weights" not in record:
+            return None
+        learned = record["learned_weights"]
+        return dict(learned) if isinstance(learned, dict) else None
 
 
 class SqlOrchestratorStore:
@@ -841,6 +900,11 @@ class SqlOrchestratorStore:
                         category=category or "",
                         outcome=feedback.outcome,
                         age_days=age_days,
+                        finding_id=(
+                            str(feedback.finding_id)
+                            if feedback.finding_id is not None
+                            else None
+                        ),
                     )
                 )
         return events
@@ -933,6 +997,65 @@ class SqlOrchestratorStore:
                 )
             )
             return set(hashes)
+
+    async def create_feedback(self, feedback: FeedbackWrite) -> str:
+        feedback_id = feedback_identity(feedback)
+        async with self._session_factory() as session, session.begin():
+            existing = await session.get(DeveloperFeedback, uuid.UUID(feedback_id))
+            if existing is None:
+                session.add(
+                    DeveloperFeedback(
+                        id=uuid.UUID(feedback_id),
+                        finding_id=uuid.UUID(feedback.finding_id),
+                        review_id=uuid.UUID(feedback.review_id),
+                        repository_id=uuid.UUID(feedback.repository_id),
+                        outcome=feedback.outcome,
+                        source=feedback.source,
+                        author_login=feedback.author_login,
+                        commit_sha=feedback.commit_sha,
+                        details=feedback.details,
+                    )
+                )
+        return feedback_id
+
+    async def resolve_feedback_finding(
+        self, review_id: object, finding_id: object
+    ) -> tuple[str, str] | None:
+        async with self._session_factory() as session:
+            finding = await session.scalar(
+                select(Finding).where(
+                    Finding.id == uuid.UUID(str(finding_id)),
+                    Finding.review_id == uuid.UUID(str(review_id)),
+                )
+            )
+            if finding is None:
+                return None
+            return (str(finding.repository_id), finding.category or "")
+
+    async def save_weight_candidate(
+        self, repository_id: object, candidate: dict[str, Any]
+    ) -> None:
+        rid = uuid.UUID(str(repository_id))
+        async with self._session_factory() as session, session.begin():
+            row = await session.scalar(
+                select(RepositoryMemory).where(RepositoryMemory.repository_id == rid)
+            )
+            if row is None:
+                row = RepositoryMemory(repository_id=rid, snapshot={}, decay_params={})
+                session.add(row)
+            row.learned_weights = dict(candidate)
+
+    async def repository_learned_weights(
+        self, repository_id: object
+    ) -> dict[str, Any] | None:
+        rid = uuid.UUID(str(repository_id))
+        async with self._session_factory() as session:
+            row = await session.scalar(
+                select(RepositoryMemory).where(RepositoryMemory.repository_id == rid)
+            )
+            if row is None or row.learned_weights is None:
+                return None
+            return dict(row.learned_weights)
 
     @staticmethod
     def _int(value: object) -> int:

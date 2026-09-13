@@ -167,7 +167,7 @@ datasets/           Dataset registration and processing scripts
 
 ## Current status
 
-**Phase 10 complete — repository memory + RAG + temporal decay; the four previously-zeroed ARUM features (`historical_actionability`, `historical_rejection`, `repository_relevance`, `context_relevance`) now score from developer-feedback memory and pgvector retrieval of standards/resolved findings. Publication happens in the phase that actually publishes.**
+**Phase 11 complete — the developer feedback loop: an explicit `POST /api/v1/feedback` endpoint (idempotent, rate-limited, 404 for unknown findings) records developer outcomes, refreshes the repository memory snapshot on write, and the ARUM weight leaner derives candidate weight sets from decision-trace × feedback — evaluated in-sample, versioned, never auto-promoted (NFR-5.1). Learning happens off the request path; "code changed" is recorded as re-evaluation evidence and never auto-labels a finding (FR-5.2). Publication happens in the phase that actually publishes.**
 
 - Phase 0: full design documentation (`docs/`).
 - Phase 1: requirements frozen (`docs/REQUIREMENTS.md`), backend package installed
@@ -277,8 +277,25 @@ datasets/           Dataset registration and processing scripts
   stays honest with 0.0 features and an explanatory supervisor note. New config:
   `arum_rag_top_k`, `arum_rag_min_similarity`. 325 tests: 316 pass (9 live-dependency
   tests self-skip without PostgreSQL/Redis).
+- Phase 11: the developer feedback loop (`backend/app/adaptive/feedback.py`,
+  `backend/app/adaptive/learning.py`, `backend/app/api/feedback.py`).
+  `POST /api/v1/feedback` accepts an explicit outcome (`ACCEPTED`/`FIXED`/`MODIFIED`/
+  `REJECTED`/`DISMISSED`/`IGNORED`/`DISCUSSION`) for a finding, resolves the repository
+  server-side, persists idempotently (deterministic id), and rebuilds the repository
+  memory snapshot so the next review's historical features reflect the outcome
+  (FR-5.3). A `commit_sha` attaches code-change evidence to `details` — it never
+  changes the developer's outcome (FR-5.2). Learning is offline and honest: the
+  learner joins decision-trace rows (`MemoryDecisionTrace.read_all()`) to labelled
+  feedback by finding id, labels only actionable vs rejective outcomes, returns
+  `None` below the `learning_min_examples` guard (never a noisy model), and stores
+  candidate weights (logistic ablation, in-sample evaluated, versioned
+  `v2-logistic-…`) in `repository_memory.learned_weights` — never auto-promoted into
+  active scoring. `FeedbackEvent` carries `finding_id` for the join. New config:
+  `rate_limit_feedback_per_minute`, `learning_min_examples`. Migration
+  `0006_repository_memory_learned_weights`. 371 tests: 362 pass (9 live-dependency
+  tests self-skip without PostgreSQL/Redis).
 
-Remaining phases (11–19) are tracked in `docs/ROADMAP.md`. Features not yet implemented
+Remaining phases (12–19) are tracked in `docs/ROADMAP.md`. Features not yet implemented
 are NOT claimed.
 
 ---

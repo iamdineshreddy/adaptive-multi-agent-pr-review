@@ -101,9 +101,24 @@ Body:
 ```
 `outcome` ∈ `ACCEPTED | FIXED | MODIFIED | REJECTED | DISMISSED | IGNORED | DISCUSSION`.
 
+Implemented (Phase 11): the endpoint resolves the repository **server-side from the
+finding** (not trusted from the body), persists the row idempotently (deterministic
+`feedback_id`), and rebuilds the repository memory snapshot on write (`repository_id`,
+`memory_version` in the response reflect the refreshed state). Per-IP rate limited.
+
+Responses:
+- `201 Created` → `{ "feedback_id": "…", "recorded": true, "memory_version": 3 }`
+- `404` → `finding_not_found` (finding not found for the given review)
+- `422` schema rejection, `429` rate limited.
+
+A supplied `commit_sha` is stored as code-change evidence in `details`; it never
+changes the outcome the developer gave (see below).
+
 This is the **explicit** feedback path. The system also ingests implicit signals from
 GitHub activity, but those never auto-labelled `ACCEPTED`/`FIXED` without an explicit
-outcome (see `docs/ARUM.md` § / architecture §4.6).
+outcome (see `docs/ARUM.md` §5 / `docs/ARCHITECTURE.md` §4.6). Weight learning from
+labelled feedback is an offline capability (`backend/app/adaptive/learning.py`),
+documented in `docs/ARUM.md` §4.
 
 ---
 

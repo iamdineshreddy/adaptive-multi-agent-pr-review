@@ -80,6 +80,7 @@ class RepositoryMemory(Base):
         JSONB, default=dict, nullable=False
     )
     arum_weights: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
+    learned_weights: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
     version: Mapped[int] = mapped_column(Integer, default=1, nullable=False)
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
