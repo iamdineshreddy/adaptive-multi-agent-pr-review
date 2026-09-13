@@ -86,6 +86,10 @@ class Settings(BaseSettings):
     celery_dead_letter_redis_key: str = "adaptive_review:dead_letter"
     queue_dispatch_provider: str = "celery"  # "celery" | "logging"
 
+    # --- Orchestrator (docs/AGENTS.md §2) -----------------------------------
+    orchestrator_max_agent_retries: int = 2  # bounded agent retries on transient errors
+    orchestrator_agent_timeout_seconds: float = 120.0  # hard per-agent wall-clock cap
+
     # --- Observability -------------------------------------------------------
     langfuse_public_key: str = ""
     langfuse_secret_key: str = ""

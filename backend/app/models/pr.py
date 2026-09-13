@@ -126,9 +126,11 @@ class Review(Base):
         String(64), unique=True, index=True
     )
     failure_reason: Mapped[str | None] = mapped_column(Text)
+    root_cause: Mapped[str | None] = mapped_column(Text)
+    supervisor_notes: Mapped[list[str] | None] = mapped_column(JSONB)
+    status_history: Mapped[list[dict[str, Any]] | None] = mapped_column(JSONB)
     budget_cap: Mapped[int | None] = mapped_column(Integer)
     arum_version: Mapped[str | None] = mapped_column(Text)
-    root_cause: Mapped[str | None] = mapped_column(Text)
     feedback_aggregate: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
     started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))

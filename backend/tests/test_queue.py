@@ -12,6 +12,7 @@ import uuid
 import pytest
 
 from app.config.settings import Settings
+from app.orchestrator.dispatch import OrchestrationDispatcher
 from app.queue import backoff as backoff_mod
 from app.queue import deadletter as deadletter_mod
 from app.queue.backoff import backoff_delay
@@ -27,7 +28,11 @@ from app.queue.priority import (
     make_member,
     member_review_id,
 )
-from app.queue.tasks import drain_and_stage, stage_review_to_priority
+from app.queue.tasks import (
+    drain_and_stage,
+    pop_and_dispatch,
+    stage_review_to_priority,
+)
 
 RID_A = uuid.UUID("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa")
 RID_B = uuid.UUID("bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb")
@@ -161,6 +166,39 @@ class TestDrainAndStage:
         assert await drain_and_stage(MemoryPriorityStore()) is None
 
 
+class TestPopAndDispatch:
+    async def test_dispatches_popped_highest_priority(self) -> None:
+        store = MemoryPriorityStore([(RID_A, 3.0, 1), (RID_B, 8.5, 2)])
+        dispatched: list[uuid.UUID] = []
+
+        async def fake_dispatch(review_id: uuid.UUID) -> None:
+            dispatched.append(review_id)
+
+        entry = await pop_and_dispatch(store, fake_dispatch)
+        assert entry is not None
+        assert entry.review_id == RID_B
+        assert dispatched == [RID_B]
+        assert await store.size() == 1
+
+    async def test_empty_store_does_not_dispatch(self) -> None:
+        dispatched: list[uuid.UUID] = []
+
+        async def fake_dispatch(review_id: uuid.UUID) -> None:
+            dispatched.append(review_id)
+
+        assert await pop_and_dispatch(MemoryPriorityStore(), fake_dispatch) is None
+        assert dispatched == []
+
+    async def test_dispatch_failure_propagates(self) -> None:
+        store = MemoryPriorityStore([(RID_A, 5.0, 1)])
+
+        async def broken_dispatch(review_id: uuid.UUID) -> None:
+            raise RuntimeError("broker down")
+
+        with pytest.raises(RuntimeError, match="broker down"):
+            await pop_and_dispatch(store, broken_dispatch)
+
+
 # --- dead-letter ----------------------------------------------------------------
 
 
@@ -202,6 +240,7 @@ class TestCeleryApp:
         assert TASK_ROUTES["queue.enqueue_review"]["queue"] == "pr_ingestion_queue"
         assert TASK_ROUTES["queue.pop_and_stage"]["queue"] == "default"
         assert TASK_ROUTES["agents.run_agent"]["queue"] == "review_task_queue"
+        assert TASK_ROUTES["orchestrator.run_review"]["queue"] == "review_task_queue"
         assert set(QUEUES.values()) == {
             "pr_ingestion_queue",
             "review_task_queue",
@@ -215,6 +254,10 @@ class TestCeleryApp:
             "feedback_queue",
             "default",
         }
+
+    def test_orchestrator_module_is_included(self) -> None:
+        app = create_celery()
+        assert "app.orchestrator.tasks" in app._conf["include"]
 
 
 class TestCeleryDispatcher:
@@ -242,3 +285,29 @@ class TestCeleryDispatcher:
         }
         assert result.dispatched is True
         assert "task-42" in result.note
+
+
+class TestOrchestrationDispatcher:
+    async def test_dispatches_to_review_task_queue(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        captured: dict = {}
+
+        class FakeResult:
+            id = "task-99"
+
+        def fake_send_task(name: str, args: list, queue: str) -> FakeResult:
+            captured["name"] = name
+            captured["args"] = args
+            captured["queue"] = queue
+            return FakeResult()
+
+        monkeypatch.setattr(
+            "app.orchestrator.dispatch.celery_app.send_task", fake_send_task
+        )
+        await OrchestrationDispatcher().dispatch(RID_A)
+        assert captured == {
+            "name": "orchestrator.run_review",
+            "args": [str(RID_A)],
+            "queue": "review_task_queue",
+        }

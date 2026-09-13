@@ -38,6 +38,9 @@ llm = [
     "openai>=1.30",
     "anthropic>=0.25",
 ]
+orchestration = [
+    "langgraph>=0.6,<2",
+]
 ml = [
     "lightgbm>=4.3",
     "numpy>=1.26",
@@ -47,7 +50,7 @@ monitoring = [
     "prometheus-client>=0.21",
     "langfuse>=2.30",
 ]
-all = ["adaptive-review[db,llm,queue,ml,monitoring]"]
+all = ["adaptive-review[db,llm,queue,ml,monitoring,orchestration]"]
 
 [project.scripts]
 adaptive-review = "app.main:create_app"
@@ -76,7 +79,25 @@ module = ["celery", "celery.*", "kombu", "kombu.*", "billiard", "vine"]
 ignore_missing_imports = true
 
 [[tool.mypy.overrides]]
+# LangGraph ships partially-typed langchain-core deps; orchestration logic is
+# the unit-tested surface while the graph library itself is treated as an
+# external dependency, not a strict-mypy target.
+module = ["langgraph", "langgraph.*", "langchain.*", "langsmith.*"]
+ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
 # Celery's task decorator is untyped; the tasks are thin sync wrappers over
 # typed async cores (app.queue.tasks), which are the actual unit-tested surface.
 module = ["app.queue.tasks", "app.queue.celery_app", "app.queue.agent_tasks"]
 disable_error_code = ["untyped-decorator", "no-untyped-def", "no-any-return"]
+
+[[tool.mypy.overrides]]
+module = ["app.orchestrator.tasks"]
+disable_error_code = ["untyped-decorator", "no-untyped-def", "no-any-return"]
+
+[[tool.mypy.overrides]]
+# LangGraph's add_node/add_conditional_edges overloads reject explicitly-typed
+# OrchestrationState node callables; the topology is proven by the orchestrator
+# graph tests, so these wiring calls skip mypy's overload resolution.
+module = ["app.orchestrator.graph"]
+disable_error_code = ["call-overload"]

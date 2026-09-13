@@ -31,6 +31,7 @@ TASK_ROUTES = {
     "queue.enqueue_review": {"queue": QUEUES["pr_ingestion"]},
     "queue.pop_and_stage": {"queue": QUEUES["default"]},
     "agents.run_agent": {"queue": QUEUES["review_task"]},
+    "orchestrator.run_review": {"queue": QUEUES["review_task"]},
 }
 
 
@@ -39,7 +40,11 @@ def create_celery(settings: Settings | None = None) -> Celery:
     cfg = settings or get_settings()
     app = Celery(
         "adaptive_review",
-        include=["app.queue.tasks", "app.queue.agent_tasks"],
+        include=[
+            "app.queue.tasks",
+            "app.queue.agent_tasks",
+            "app.orchestrator.tasks",
+        ],
     )
     app.conf.update(
         broker_url=cfg.redis_url,

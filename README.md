@@ -167,7 +167,7 @@ datasets/           Dataset registration and processing scripts
 
 ## Current status
 
-**Phase 5 complete — specialized review agents, structured output, LLM providers.**
+**Phase 6 complete — supervisor + LangGraph orchestration with retry/failure paths.**
 
 - Phase 0: full design documentation (`docs/`).
 - Phase 1: requirements frozen (`docs/REQUIREMENTS.md`), backend package installed
@@ -202,8 +202,20 @@ datasets/           Dataset registration and processing scripts
   and scope building. `agents.run_agent` Celery task routes to `review_task_queue` as
   the Phase 6 fan-out seam. 151 tests: 145 pass (6 live-dependency tests self-skip
   without PostgreSQL/Redis).
+- Phase 6: Supervisor + LangGraph orchestration (`backend/app/orchestrator/`) — the
+  AGENTS.md §2 topology (`SUPERVISOR_PLAN → AGENT_FAN_OUT → RETRY_AGENTS`) with
+  bounded agent retries (max 2), a hard per-agent timeout that diagnoses permanent
+  `FAILED` with `root_cause` while keeping partial valid findings, an
+  `OrchestratorStore` boundary (`Memory` for tests, `Sql` for PostgreSQL) persisting
+  status transitions (`status_history`), `supervisor_notes`, per-agent `review_tasks`
+  and `agent_metrics`, an `orchestrator.run_review` Celery task on
+  `review_task_queue` with live DB + GitHub scope rebuild, and `queue.pop_and_dispatch`
+  handing the popped priority review to the orchestrator. Terminal mapping: COMPLETE
+  with findings → `CONSOLIDATING` (Phase 7 checkpoint), no findings → `COMPLETED`,
+  permanent failure → `FAILED`. Migration `0004_orchestrator_notes`. 201 tests:
+  193 pass (8 live-dependency tests self-skip without PostgreSQL/Redis).
 
-Remaining phases (6–19) are tracked in `docs/ROADMAP.md`. Features not yet implemented
+Remaining phases (7–19) are tracked in `docs/ROADMAP.md`. Features not yet implemented
 are NOT claimed.
 
 ---

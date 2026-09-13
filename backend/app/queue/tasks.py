@@ -3,11 +3,13 @@
 - ``enqueue_review_task``: consumed on ``pr_ingestion_queue``; reads the stored
   priority score and stages the review on the Redis priority zset.
 - ``pop_and_stage_task``: scheduler entry point; pops the highest-priority review
-  from the zset and records the hand-off intent. The orchestrator fan-out itself
-  lands in Phase 6 (LangGraph), so this task returns the popped review id and stops.
+  from the zset and hands it to the orchestrator fan-out core
+  (``queue.pop_and_dispatch``). The fan-out itself is Phase 6 (LangGraph),
+  dispatched as ``orchestrator.run_review`` on ``review_task_queue``.
 
-DB/Redis work is delegated to ``asyncio.run`` cores; the store and score loader
-are injectable so the orchestration logic is unit-testable without a broker.
+DB/Redis work is delegated to ``asyncio.run`` cores; the store, score loader and
+dispatch callable are injectable so the orchestration logic is unit-testable
+without a broker.
 """
 
 from __future__ import annotations
@@ -24,6 +26,7 @@ from celery.exceptions import MaxRetriesExceededError
 
 from app.config.settings import get_settings
 from app.database import SessionFactory
+from app.orchestrator.dispatch import Dispatch
 from app.queue.backoff import backoff_delay
 from app.queue.db import fetch_priority_score
 from app.queue.deadletter import (
@@ -76,15 +79,38 @@ async def stage_review_to_priority(
     }
 
 
+async def pop_and_dispatch(
+    store: PriorityStore, dispatch: Dispatch
+) -> PriorityEntry | None:
+    """Pop the highest-priority review and push it into the orchestrator fan-out.
+
+    The popped review is this call's responsibility: the hand-off sends
+    ``orchestrator.run_review`` to ``review_task_queue`` (docs/QUEUE.md §1).
+    Dispatch failures re-raise so the caller decides whether the review stays
+    acknowledged (broker acks_late governs redelivery).
+    """
+    entry = await store.pop_highest()
+    if entry is None:
+        return None
+    await dispatch(entry.review_id)
+    logger.info(
+        "scheduler_dispatched_review",
+        review_id=str(entry.review_id),
+        priority_score=entry.score,
+        task="orchestrator.run_review",
+    )
+    return entry
+
+
 async def drain_and_stage(store: PriorityStore) -> PriorityEntry | None:
-    """Pop the highest-priority review; orchestrator hand-off is Phase 6."""
+    """Pop the highest-priority review without dispatching (scheduler core)."""
     entry = await store.pop_highest()
     if entry is not None:
         logger.info(
             "scheduler_handoff_intent",
             review_id=str(entry.review_id),
             priority_score=entry.score,
-            note="Orchestrator fan-out lands in Phase 6.",
+            note="Pop pulled; dispatch handled by pop_and_dispatch.",
         )
     return entry
 
@@ -137,12 +163,14 @@ def enqueue_review_task(
 
 @shared_task(name="queue.pop_and_stage")
 def pop_and_stage_task() -> str | None:
-    """Scheduler: pop the highest-priority review from the zset."""
+    """Scheduler: pop the highest-priority review and dispatch the fan-out."""
 
     async def _pop() -> PriorityEntry | None:
+        from app.orchestrator.dispatch import OrchestrationDispatcher
+
         store = RedisPriorityStore()
         try:
-            return await drain_and_stage(store)
+            return await pop_and_dispatch(store, OrchestrationDispatcher().dispatch)
         finally:
             await store.aclose()
 

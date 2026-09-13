@@ -114,6 +114,8 @@ Unique index: `(repository_id, number)`. Index: `priority_score`, `state`, `head
 | budget_cap | int | resolved cap for this review |
 | arum_version | text null | model family used |
 | root_cause | text null | if FAILED |
+| supervisor_notes | jsonb | time-ordered supervisor notes; appended on permanent agent failure (AGENTS.md §2) |
+| status_history | jsonb | time-stamped state-transition trail (ARCHITECTURE.md §4.3) |
 | feedback_aggregate | jsonb | rolling outcome counts snapshot |
 | started_at / completed_at | timestamptz | |
 | created_at / updated_at | timestamptz | |

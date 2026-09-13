@@ -12,7 +12,7 @@ pass.
 | 3 | GitHub webhook service: signature verify, Pydantic validation, idempotency, PR ingestion | **done** (`POST /api/v1/webhooks/github`, HMAC-SHA256/SHA1, rate limits, ping/unknown-event handling, SqlReviewIngester with delivery-id idempotency, priority scoring per QUEUE.md §2; dispatch is log-only until the Phase 4 broker — see below; 27 webhook tests + live-DB ingestion test that self-skips without PostgreSQL) |
 | 4 | Queue: Celery app, Redis broker, priority zset, queues, retries, dead-letter | **done** (Celery app + Redis broker, queue routes from QUEUE.md §1, `RedisPriorityStore` zset scheduling, bounded backoff retries, `dead_letters` table + Review→FAILED with `failure_reason`, scheduler pop task; the orchestrator hand-off it pops for is Phase 6) |
 | 5 | Agents: security, quality, performance, architecture, standards — structured output, LLM provider abstraction | **done** (`backend/app/agents/`: Pydantic `AgentFinding` contract + strict batch parse that drops-and-counts invalid items via `failed_results`; `LLMProvider` abstraction (OpenAI / Anthropic / mock) with bounded retry + fallback and per-call token/cost accounting; versioned system prompts with role-audit, delimited data blocks and `neutralise_instruction_markers`; unified-diff windowing per changed file (`diff_utils`); agent registry + `run_agent`; FR-1.3 GitHub REST client (`backend/app/github/`) with retryable/permanent error taxonomy and `build_scope_from_github`; `agents.run_agent` Celery task routed to `review_task_queue` as the Phase 6 fan-out seam. Persistence of findings/metrics and changed-file priority factors are Phase 6/7) |
-| 6 | Supervisor + LangGraph orchestration: states/transitions, fan-out, retry/failure paths | todo |
+| 6 | Supervisor + LangGraph orchestration: states/transitions, fan-out, retry/failure paths | **done** (`backend/app/orchestrator/`: LangGraph topology matching AGENTS.md §2 — `SUPERVISOR_PLAN → AGENT_FAN_OUT → RETRY_AGENTS` loop with bounded retries (max 2), hard per-agent timeout → permanent `FAILED` with `root_cause`, partial valid findings always preserved; JSON-safe state; `InProcessAgentRunner` (unit-tested classification) + `CeleryFanOutRunner` (production, joins `agents.run_agent` across the per-agent queues); `OrchestratorStore` boundary with `Memory` (tests) + `Sql` (PostgreSQL) implementations writing review status transitions (`status_history`), `supervisor_notes`, per-agent `review_tasks` (`queue_name`→agent queue, retry_count, last_error, scope) and `agent_metrics`; `orchestrator.run_review` Celery task on `review_task_queue` with live DB+GitHub scope rebuild (`scope_builder`); `queue.pop_and_dispatch` hands the popped priority review to the orchestrator; terminal mapping: graph COMPLETE with findings → `CONSOLIDATING` (checkpoint for Phase 7), no findings → `COMPLETED`, permanent failure → `FAILED`. Migration `0004_orchestrator_notes`; `orchestration` extra (`langgraph`). 43 orchestrator/queue tests + self-skipping live-DB SQL store tests) |
 | 7 | Finding consolidation + cross-agent redundancy detection (embeddings + cosine + proximity) | todo |
 | 8 | ARUM: features, weights, scoring, LightGBM training path, logistic ablation, reproducibility log | todo |
 | 9 | Review budget controller + safety gates | todo |
@@ -38,13 +38,14 @@ consumes what GitHub sends in the event payload; changed-file-driven priority
 factors (security, dependency, component) therefore stay at their documented 0.0
 baseline until then.
 
-Phase 4 scope note: the **priority zset and scheduler are implemented and wired**
-(webhook → `pr_ingestion_queue` → zset → `queue.pop_and_stage`), but the popped
-review is handed to the orchestrator in Phase 6 (LangGraph). Until then
-`queue.pop_and_stage` records the hand-off intent and returns the review id —
-it does not pretend to run agents. Without a broker, dispatch falls back to the
-Phase 3 log-only provider via `queue_dispatch_provider=logging` (default is
-`celery`, which requires a reachable broker and surfaces enqueue failure as a 500).
+Phase 4 scope note: the **priority zset, scheduler, and orchestrator fan-out are
+wired end-to-end** (webhook → `pr_ingestion_queue` → zset → `queue.pop_and_stage`
+→ `queue.pop_and_dispatch` → `orchestrator.run_review` on `review_task_queue`).
+Nobody pretends agents ran when they did not: unit + live-DB tests cover the
+cores, and broker delivery itself is exercised in Phase 16 integration. Without
+a broker, dispatch falls back to the Phase 3 log-only provider via
+`queue_dispatch_provider=logging` (default is `celery`, which requires a
+reachable broker and surfaces enqueue failure as a 500).
 
 ## Cross-cutting requirements (apply every phase)
 
