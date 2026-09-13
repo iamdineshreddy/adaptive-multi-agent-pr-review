@@ -126,7 +126,9 @@ async def test_success_with_findings_lands_on_deciding_checkpoint(
     # Phase 7: the candidate is consolidated into the store, embedded, and the
     # review is handed to the decision layer only after that succeeded.
     assert len(store.findings) == 1
-    assert store.findings[0]["publication_status"] == "CANDIDATE"
+    # Phase 8/9: the candidate is scored by ARUM and selected under the budget
+    # (HIGH + high confidence -> protected gate) -> scheduled for publication.
+    assert store.findings[0]["publication_status"] == "SCHEDULED"
     assert store.findings[0]["duplicate_group"] is None  # singleton: no group
     assert len(store.finding_groups) == 0
     assert len(store.embeddings) == 1

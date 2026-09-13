@@ -71,6 +71,13 @@ class Settings(BaseSettings):
     review_budget_medium: int = 10
     review_budget_high: int = 20
 
+    # --- ARUM safety gates (ARUM.md §7) -------------------------------------
+    # Evaluated after scoring, never bypassed silently. Gate thresholds live on
+    # feature values (severity is the ARUM feature score: HIGH=0.8, CRITICAL=1.0).
+    arum_gate_high_confidence: float = 0.8
+    arum_gate_low_confidence: float = 0.3
+    arum_gate_high_redundancy: float = 0.6
+
     # --- Priority scoring (docs/QUEUE.md §2) ---------------------------------
     priority_scale: float = 10.0  # score = scale * weighted-factor-sum (0..scale)
     priority_w_security: float = 0.30

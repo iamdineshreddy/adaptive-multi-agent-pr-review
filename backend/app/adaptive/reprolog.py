@@ -1,8 +1,9 @@
 """Reproducibility log for ARUM decisions (docs/EXPERIMENTS.md §5, ARUM.md §10).
 
 Every scored candidate is recorded with the full decision context: ARUM
-version, the eight features, the exact weights, budget/gate fields (Phase 9),
-the redundancy group id, and a hash of the inputs. Rerunning the same review
+version, the eight features, the exact weights, the resolved budget cap, the
+safety-gate reason (or NULL), the selection outcome, the redundancy group id,
+and a hash of the inputs. Rerunning the same review
 with the same model version reproduces the same trace (deterministic).
 """
 

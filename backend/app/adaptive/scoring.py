@@ -14,7 +14,7 @@ from dataclasses import dataclass
 from app.adaptive.features import ArumFeatures
 from app.adaptive.weights import ArumWeights
 
-TRACE_VERSION = "1"
+TRACE_VERSION = "2"
 
 
 def utility(features: ArumFeatures, weights: ArumWeights) -> float:
@@ -36,9 +36,10 @@ def utility(features: ArumFeatures, weights: ArumWeights) -> float:
 class Decision:
     """One scored candidate — the reproducibility contract (ARUM.md §10).
 
-    ``budget_cap`` and ``safety_gate`` are populated by the Phase 9 budget
-    controller; until then they stay ``None`` and every candidate remains in
-    ``CANDIDATE`` publication status (selection is Phase 9).
+    ``budget_cap`` and ``safety_gate`` are annotated by the budget controller
+    (ARUM.md §7), and ``selected`` records whether the candidate entered the
+    publication set. Until selection runs they stay ``None``; selection is what
+    moves a candidate off ``CANDIDATE`` (to ``SCHEDULED`` or ``SUPPRESSED``).
     """
 
     review_id: str
@@ -51,6 +52,7 @@ class Decision:
     inputs_hash: str
     budget_cap: int | None = None
     safety_gate: str | None = None
+    selected: bool | None = None
 
     def to_dict(self) -> dict[str, object]:
         return {
@@ -65,6 +67,7 @@ class Decision:
             "inputs_hash": self.inputs_hash,
             "budget_cap": self.budget_cap,
             "safety_gate": self.safety_gate,
+            "selected": self.selected,
         }
 
 

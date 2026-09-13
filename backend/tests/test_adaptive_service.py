@@ -1,8 +1,10 @@
-"""Phase 8 service wiring: ARUM scoring runs inside ``run_review``.
+"""Phase 8 + Phase 9 service wiring: ARUM scoring + budget/gate selection run
+inside ``run_review``.
 
 Proves the decision contract through the orchestrator: a successful review with
 findings lands on ``DECIDING`` with every candidate scored, features/utility
-persisted on the findings, the review's ``arum_version`` recorded, and a
+persisted on the findings, budget selection applied (``SCHEDULED`` /
+``SUPPRESSED``), the review's ``arum_version`` + ``budget_cap`` recorded, and a
 ranked reproducibility trace produced. Decision-layer failure diagnoses the
 review as ``FAILED``.
 """
@@ -16,7 +18,7 @@ import pytest
 from app.adaptive import MemoryDecisionTrace
 from app.agents.contract import AgentScope, ChangeKind, FileSlice
 from app.config.settings import Settings
-from app.models.enums import ReviewStatus
+from app.models.enums import ReviewStatus, RiskClass
 from app.orchestrator.persistence import MemoryOrchestratorStore
 from app.orchestrator.runners import RunnerResult
 from app.orchestrator.service import run_review
@@ -108,10 +110,12 @@ async def test_success_scores_candidates_and_records_decision(
     assert outcome.status == ReviewStatus.DECIDING.value
     record = store.reviews[str(REVIEW_ID)]
     assert record["arum_version"] == "v1"
+    assert record["budget_cap"] == settings.review_budget_high  # no risk metadata
 
     assert len(store.findings) == 1
     scored = store.findings[0]
-    assert scored["publication_status"] == "CANDIDATE"  # selection is Phase 9
+    # HIGH severity + 0.9 confidence trips the protected gate -> selected.
+    assert scored["publication_status"] == "SCHEDULED"
     assert scored["arum_version"] == "v1"
     assert scored["arum_features"]["severity"] == 0.8  # HIGH mapped
     assert scored["arum_features"]["agent_agreement"] == 0.5  # single agent
@@ -123,9 +127,12 @@ async def test_success_scores_candidates_and_records_decision(
     assert rows[0]["utility"] == scored["arum_utility"]
     assert rows[0]["weights"]["version"] == "v1"
     assert rows[0]["inputs_hash"]
+    assert rows[0]["budget_cap"] == settings.review_budget_high
+    assert rows[0]["safety_gate"] == "high_confidence_high_severity"
+    assert rows[0]["selected"] is True
 
     notes = record["supervisor_notes"]
-    assert any("ARUM scored 1 candidates" in n for n in notes)
+    assert any("ARUM selected 1 of 1" in n for n in notes)
 
 
 async def test_cross_agent_group_scores_agreement(
@@ -154,12 +161,15 @@ async def test_cross_agent_group_scores_agreement(
     assert features["severity"] == 0.8
     assert features["agent_agreement"] == 1.0  # two distinct agents agree
     assert features["redundancy"] > 0.0  # group_size > 1
+    assert representative["publication_status"] == "SCHEDULED"
     assert trace.read_all()[0]["finding_id"] == representative["id"]
     assert trace.read_all()[0]["group_id"] == group_row
     non_representative = next(
         row for row in store.findings if row["id"] != representative["id"]
     )
     assert non_representative.get("arum_features") is None
+    # The duplicate member is absorbed into the representative's decision.
+    assert non_representative["publication_status"] == "SUPPRESSED"
 
 
 async def test_decision_layer_change_diagnoses_failed(
@@ -203,3 +213,45 @@ async def test_no_findings_never_scores(
     assert outcome.status == ReviewStatus.COMPLETED.value
     assert trace.read_all() == []
     assert store.reviews[str(REVIEW_ID)].get("arum_version") is None
+
+
+async def test_budget_cap_truncates_after_rank(
+    valid_scope: AgentScope, settings: Settings
+) -> None:
+    """A LOW-risk review (cap 5) with six low-value singletons truncates one."""
+    findings = tuple(
+        _finding(
+            severity="LOW",
+            confidence=0.2,
+            file_path=f"app/module{i}.py",
+        )
+        for i in range(6)
+    )
+    runner = ScriptedRunner({"security": [_success("security", findings=findings)]})
+    store = MemoryOrchestratorStore()
+    store.reviews[str(REVIEW_ID)] = {"risk_class": RiskClass.LOW}
+    trace = MemoryDecisionTrace()
+    await run_review(
+        valid_scope, runner=runner, store=store, settings=settings, trace=trace
+    )
+
+    record = store.reviews[str(REVIEW_ID)]
+    assert record["budget_cap"] == settings.review_budget_low  # 5
+    assert record["selected_count"] == 5
+    assert record["suppressed_count"] == 1
+
+    scheduled = [f for f in store.findings if f["publication_status"] == "SCHEDULED"]
+    suppressed = [f for f in store.findings if f["publication_status"] == "SUPPRESSED"]
+    assert len(scheduled) == 5
+    assert len(suppressed) == 1
+    assert all(f.get("safety_gate") is None for f in suppressed)
+
+    rows = trace.read_all()
+    assert len(rows) == 6
+    assert sum(1 for r in rows if r["selected"]) == 5
+    assert sum(1 for r in rows if not r["selected"]) == 1
+    assert {r["budget_cap"] for r in rows} == {settings.review_budget_low}
+
+    notes = record["supervisor_notes"]
+    assert any("ARUM selected 5 of 6" in n for n in notes)
+    assert any("budget-truncated" in n for n in notes)

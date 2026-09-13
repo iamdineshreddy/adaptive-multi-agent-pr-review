@@ -26,6 +26,7 @@ from app.adaptive import (
     extract_features,
     load_weights,
     rank_decisions,
+    select_decisions,
     utility,
 )
 from app.adaptive.features import ArumFeatures
@@ -40,7 +41,7 @@ from app.consolidation import (
 )
 from app.consolidation.datatypes import ConsolidationSummary, FindingWrite
 from app.consolidation.embeddings import EmbeddingsProvider
-from app.models.enums import ReviewStatus, TaskStatus
+from app.models.enums import ReviewStatus, RiskClass, TaskStatus
 from app.orchestrator.graph import build_orchestration_graph
 from app.orchestrator.persistence import (
     MemoryOrchestratorStore,
@@ -270,7 +271,7 @@ async def _persist(
             completed_at=now,
         )
     elif consolidated:
-        review_status = ReviewStatus.DECIDING  # checkpoint: Phase 9 consumes this
+        review_status = ReviewStatus.DECIDING  # checkpoint: not published yet
         await ctx.store.transition(review_id, review_status)
     else:
         review_status = ReviewStatus.COMPLETED
@@ -297,33 +298,71 @@ async def _decide_findings(
     review_id: str,
     summary: ConsolidationSummary,
 ) -> str | None:
-    """Score consolidated candidates with ARUM; persist features/utility.
+    """Score consolidated candidates with ARUM, then apply budget + safety gates.
 
     Returns ``None`` on success or an error string that diagnoses the review
     ``FAILED`` (consistent with the consolidation policy: nothing is silently
-    dropped from the decision trail). Selection under the review budget plus
-    safety gates is Phase 9; candidates stay ``CANDIDATE`` here and each one is
-    logged to the reproducibility trace in ranked order.
+    dropped from the decision trail). Each candidate is annotated with the
+    budget cap and gate reason it ran under, sorted by ARUM rank, and appended
+    to the reproducibility trace (ARUM.md §10). Selected candidates become
+    ``SCHEDULED``; gated/budget-truncated ones become ``SUPPRESSED`` with their
+    duplicate-group members suppressed alongside the representative. The review
+    stays on ``DECIDING`` — actually posting findings is the publisher step
+    (a later phase), so nothing here pretends publication happened.
     """
     try:
         weights = load_weights(version=ctx.settings.arum_weights_version)
         decisions = _score_candidates(review_id, summary, weights)
         ranked = rank_decisions(decisions)
+        risk_class = await ctx.store.review_risk_class(review_id)
+        cap = _budget_cap(risk_class, ctx.settings)
+        selection = select_decisions(
+            ranked,
+            cap=cap,
+            high_confidence=ctx.settings.arum_gate_high_confidence,
+            low_confidence=ctx.settings.arum_gate_low_confidence,
+            high_redundancy=ctx.settings.arum_gate_high_redundancy,
+        )
         trace = ctx.trace or MemoryDecisionTrace()
-        for decision in ranked:
+        for decision in selection.decisions:
             trace.append(decision)
             await ctx.store.apply_decision(review_id, decision)
-        await ctx.store.record_decision(review_id, arum_version=weights.version)
-        await ctx.store.append_note(
+        suppressed_count = len(selection.decisions) - selection.selected_count
+        await ctx.store.record_decision(
             review_id,
-            "supervisor: ARUM scored "
-            f"{len(summary.findings)} candidates "
-            f"(version={weights.version}, utility in trace); "
-            "budget selection + safety gates are Phase 9.",
+            arum_version=weights.version,
+            budget_cap=cap,
+            selected_count=selection.selected_count,
+            suppressed_count=suppressed_count,
         )
+        note = (
+            "supervisor: ARUM selected "
+            f"{selection.selected_count} of {len(selection.decisions)} "
+            f"candidates (version={weights.version}, budget cap {cap}; "
+            f"{selection.mandatory_count} critical-mandatory, "
+            f"{selection.protected_count} protected, "
+            f"{selection.suppressed_by_gate} gate-suppressed, "
+            f"{selection.truncated_by_budget} budget-truncated); "
+            "publication itself is a later phase."
+        )
+        if risk_class is None:
+            note += (
+                " risk_class metadata missing on the review; "
+                "used the high cap rather than truncating a valid selection."
+            )
+        await ctx.store.append_note(review_id, note)
         return None
     except Exception as exc:  # noqa: BLE001 - any decision failure must surface
         return f"ARUM decision failed: {exc}"
+
+
+def _budget_cap(risk_class: RiskClass | None, cfg: Settings) -> int:
+    """Resolve the per-review budget cap from the PR risk class (ARUM.md §7)."""
+    if risk_class == RiskClass.LOW:
+        return cfg.review_budget_low
+    if risk_class == RiskClass.MEDIUM:
+        return cfg.review_budget_medium
+    return cfg.review_budget_high  # HIGH, and unknown/missing -> most permissive
 
 
 def _score_candidates(

@@ -16,6 +16,7 @@ from datetime import UTC, datetime
 from typing import Any, Protocol
 
 from sqlalchemy import text as sa_text
+from sqlalchemy import update as sa_update
 
 from app.adaptive.scoring import Decision
 from app.config.settings import get_settings
@@ -30,7 +31,13 @@ from app.models import (
     Review,
     ReviewTask,
 )
-from app.models.enums import FindingStatus, ReviewStatus, Severity, TaskStatus
+from app.models.enums import (
+    FindingStatus,
+    ReviewStatus,
+    RiskClass,
+    Severity,
+    TaskStatus,
+)
 
 
 @dataclass(frozen=True)
@@ -102,8 +109,16 @@ class OrchestratorStore(Protocol):
         updates: Sequence[tuple[str, str]],
     ) -> None: ...
 
+    async def review_risk_class(self, review_id: object) -> RiskClass | None: ...
+
     async def record_decision(
-        self, review_id: object, *, arum_version: str
+        self,
+        review_id: object,
+        *,
+        arum_version: str,
+        budget_cap: int,
+        selected_count: int,
+        suppressed_count: int,
     ) -> None: ...
 
     async def apply_decision(self, review_id: object, decision: Decision) -> None: ...
@@ -261,18 +276,52 @@ class MemoryOrchestratorStore:
                     row["duplicate_group"] = group_id
                     break
 
-    async def record_decision(self, review_id: object, *, arum_version: str) -> None:
+    async def review_risk_class(self, review_id: object) -> RiskClass | None:
+        record = self.reviews.get(str(review_id), {})
+        value = record.get("risk_class")
+        if value is None:
+            return None
+        return value if isinstance(value, RiskClass) else RiskClass(value)
+
+    async def record_decision(
+        self,
+        review_id: object,
+        *,
+        arum_version: str,
+        budget_cap: int,
+        selected_count: int,
+        suppressed_count: int,
+    ) -> None:
         review = self.reviews.get(str(review_id))
         if review is not None:
             review["arum_version"] = arum_version
+            review["budget_cap"] = budget_cap
+            review["selected_count"] = selected_count
+            review["suppressed_count"] = suppressed_count
 
     async def apply_decision(self, review_id: object, decision: Decision) -> None:
-        for row in self.findings:
-            if row["id"] == decision.finding_id:
-                row["arum_features"] = decision.features.as_dict()
-                row["arum_utility"] = decision.utility
-                row["arum_version"] = decision.arum_version
-                break
+        target = next(
+            (row for row in self.findings if row["id"] == decision.finding_id),
+            None,
+        )
+        if target is None:
+            return
+        target["arum_features"] = decision.features.as_dict()
+        target["arum_utility"] = decision.utility
+        target["arum_version"] = decision.arum_version
+        if decision.selected is not None:
+            target["publication_status"] = (
+                FindingStatus.SCHEDULED.value
+                if decision.selected
+                else FindingStatus.SUPPRESSED.value
+            )
+        if decision.selected is not None and decision.group_id:
+            for row in self.findings:
+                if (
+                    row["duplicate_group"] == decision.group_id
+                    and row["id"] != decision.finding_id
+                ):
+                    row["publication_status"] = FindingStatus.SUPPRESSED.value
 
 
 class SqlOrchestratorStore:
@@ -487,12 +536,27 @@ class SqlOrchestratorStore:
                     },
                 )
 
-    async def record_decision(self, review_id: object, *, arum_version: str) -> None:
+    async def review_risk_class(self, review_id: object) -> RiskClass | None:
+        rid = uuid.UUID(str(review_id))
+        async with self._session_factory() as session:
+            review = await session.get(Review, rid)
+            return review.risk_class if review is not None else None
+
+    async def record_decision(
+        self,
+        review_id: object,
+        *,
+        arum_version: str,
+        budget_cap: int,
+        selected_count: int,
+        suppressed_count: int,
+    ) -> None:
         rid = uuid.UUID(str(review_id))
         async with self._session_factory() as session, session.begin():
             review = await session.get(Review, rid)
             if review is not None:
                 review.arum_version = arum_version
+                review.budget_cap = budget_cap
 
     async def apply_decision(self, review_id: object, decision: Decision) -> None:
         rid = uuid.UUID(str(review_id))
@@ -504,6 +568,21 @@ class SqlOrchestratorStore:
             finding.arum_features = decision.features.as_dict()
             finding.arum_utility = decision.utility
             finding.arum_version = decision.arum_version
+            if decision.selected is not None:
+                finding.publication_status = (
+                    FindingStatus.SCHEDULED
+                    if decision.selected
+                    else FindingStatus.SUPPRESSED
+                )
+            if decision.selected is not None and decision.group_id:
+                await session.execute(
+                    sa_update(Finding)
+                    .where(
+                        Finding.duplicate_group == uuid.UUID(decision.group_id),
+                        Finding.id != finding_id,
+                    )
+                    .values(publication_status=FindingStatus.SUPPRESSED)
+                )
 
     @staticmethod
     def _int(value: object) -> int:

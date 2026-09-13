@@ -89,7 +89,7 @@ def test_decision_is_serialisable_and_self_consistent() -> None:
     assert payload["arum_version"] == "v1"
     assert payload["features"]["severity"] == 0.8
     assert payload["utility"] == decision.utility
-    assert payload["budget_cap"] is None  # filled by Phase 9
+    assert payload["budget_cap"] is None  # filled only when selection runs
     assert payload["safety_gate"] is None
     assert payload["group_id"] is None
 

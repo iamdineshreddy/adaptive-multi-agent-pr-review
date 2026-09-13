@@ -118,7 +118,14 @@ async def test_cross_agent_redundancy_group_persisted(
     grouped_ids = {f["duplicate_group"] for f in store.findings}
     assert grouped_ids == {group["id"]}
     assert {f["agent_key"] for f in store.findings} == {"security", "quality"}
-    assert all(f["publication_status"] == "CANDIDATE" for f in store.findings)
+    # Phase 9 selection: the representative is protected (HIGH + high conf) and
+    # scheduled; its duplicate member is absorbed/suppressed.
+    representative = next(f for f in store.findings if "arum_features" in f)
+    assert representative["publication_status"] == "SCHEDULED"
+    duplicates = [f for f in store.findings if f["id"] != representative["id"]]
+    assert duplicates and all(
+        f["publication_status"] == "SUPPRESSED" for f in duplicates
+    )
 
     notes = store.reviews[str(REVIEW_ID)]["supervisor_notes"]
     assert any("redundancy groups" in n for n in notes)

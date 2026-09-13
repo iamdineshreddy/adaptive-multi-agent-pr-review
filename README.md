@@ -167,7 +167,7 @@ datasets/           Dataset registration and processing scripts
 
 ## Current status
 
-**Phase 8 complete — ARUM decision layer (features, scoring, learning path, reproducibility log); projects land on the `DECIDING` checkpoint pending Phase 9 budget + safety gates.**
+**Phase 9 complete — ARUM budget controller + safety gates; reviews resolve a per-review publication budget and gate/truncate selections on the `DECIDING` checkpoint. Publication happens in the phase that actually publishes.**
 
 - Phase 0: full design documentation (`docs/`).
 - Phase 1: requirements frozen (`docs/REQUIREMENTS.md`), backend package installed
@@ -241,12 +241,30 @@ datasets/           Dataset registration and processing scripts
   reproducibility log (deterministic inputs hash; `MemoryDecisionTrace` in tests,
   JSON-lines `FileDecisionTrace` in production). The orchestrator scores every
   consolidated candidate, writes `finding.arum_features/arum_utility/arum_version`
-  + `reviews.arum_version`, appends decisions to the trace, and stays on `DECIDING`
-  — budget selection + safety gates are Phase 9. Decision-layer failures diagnose
-  `FAILED` with `root_cause` while preserving partial valid findings. 296 tests:
-  287 pass (9 live-dependency tests self-skip without PostgreSQL/Redis).
+  + `reviews.arum_version`, appends decisions to the trace, and stays on `DECIDING`.
+  Decision-layer failures diagnose `FAILED` with `root_cause` while preserving
+  partial valid findings. 296 tests: 287 pass (9 live-dependency tests self-skip
+  without PostgreSQL/Redis).
+- Phase 9: review budget controller + safety gates (`backend/app/adaptive/selection.py`).
+  `RiskClass` on the review record resolves a per-review publication cap
+  (`review_budget_low/medium/high` = 5/10/20; unknown risk-class → high cap with a
+  supervisor note). `select_decisions` fills the cap by ARUM rank after three
+  never-silent gates: critical severity → mandatory, high severity + high confidence
+  → protected from truncation, low confidence + low severity + high redundancy →
+  suppressed; mandatory/protected selections count against the cap so criticals push
+  publication above it. Every decision carries `budget_cap` + `safety_gate`
+  (`critical_mandatory` / `high_confidence_high_severity` / `low_value_high_redundancy`),
+  and `selected` lands in the reproducibility trace (`TRACE_VERSION` → 2). Wiring:
+  selected representatives → `publication_status=scheduled`, suppressed/truncated →
+  `suppressed`, duplicate-group members suppressed alongside their representative;
+  the review records `budget_cap` + `selected_count`/`suppressed_count` + a supervisor
+  note ("ARUM selected X of Y candidates — publication itself is a later phase"). The
+  review still ends on the `DECIDING` checkpoint — the PUBLISH phase is what publishes.
+  New config: `arum_gate_high_confidence`, `arum_gate_low_confidence`,
+  `arum_gate_high_redundancy`. 306 tests: 297 pass (9 live-dependency tests self-skip
+  without PostgreSQL/Redis).
 
-Remaining phases (9–19) are tracked in `docs/ROADMAP.md`. Features not yet implemented
+Remaining phases (10–19) are tracked in `docs/ROADMAP.md`. Features not yet implemented
 are NOT claimed.
 
 ---

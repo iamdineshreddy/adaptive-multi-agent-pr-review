@@ -1,10 +1,10 @@
 """ARUM: the adaptive decision layer (docs/ARUM.md).
 
 Scored, deterministic finding selection: feature extraction → weighted utility →
-ranking, plus the offline logistic/LightGBM training path and the
-reproducibility log. Budget enforcement + safety gates land in Phase 9;
-RAG-driven relevance and feedback memory feed ``repository_relevance`` /
-``context_relevance`` / historical shares in Phases 10–12.
+ranking → review budget + safety gates, plus the offline logistic/LightGBM
+training path and the reproducibility log. RAG-driven relevance and feedback
+memory feed ``repository_relevance`` / ``context_relevance`` / historical shares
+in Phases 10–12.
 """
 
 from __future__ import annotations
@@ -30,6 +30,7 @@ from app.adaptive.reprolog import (
     compute_inputs_hash,
 )
 from app.adaptive.scoring import Decision, rank_decisions, utility
+from app.adaptive.selection import SelectionResult, select_decisions
 from app.adaptive.training import (
     MlExtraUnavailableError,
     TrainingMatrix,
@@ -59,6 +60,7 @@ __all__ = [
     "FileDecisionTrace",
     "MemoryDecisionTrace",
     "MlExtraUnavailableError",
+    "SelectionResult",
     "TrainingMatrix",
     "agent_agreement",
     "build_training_matrix",
@@ -78,6 +80,7 @@ __all__ = [
     "rank_decisions",
     "redundancy_term",
     "repository_relevance",
+    "select_decisions",
     "severity_score",
     "split_train_eval",
     "utility",

@@ -202,14 +202,23 @@ group-id write-back on the member findings.
 
 ### 3.9 ARUM decision provenance
 
-The decision layer (Phase 8, `app/adaptive/`) writes **reproducibility records**
+The decision layer (Phase 8/9, `app/adaptive/`) writes **reproducibility records**
 (ARUM.md §10) as JSON-lines to a file configured by `settings.arum_decision_log_path`
 (one object per `Decision`: review_id, finding_id, group_id, arum_version, features,
-utility, weights, inputs_hash, budget_cap/safety_gate reserved for Phase 9). The files
-are the append-only research trail; `findings.arum_features/arum_utility/arum_version`
-(§3.7) are the denormalised snapshot and `reviews.arum_version` records the weights
-family, so decision-time state is queryable without reading the log. Selection under
-the review budget (`budget_cap`) and safety gates is Phase 9.
+utility, weights, inputs_hash, budget_cap, safety_gate, selected; `TRACE_VERSION` = 2).
+The files are the append-only research trail; `findings.arum_features/arum_utility/
+arum_version` (§3.7 — plus `publication_status` = `scheduled`/`suppressed`) are the
+denormalised snapshot, and `reviews.arum_version`/`reviews.budget_cap` record the
+weights family and resolved review budget, so decision-time state is queryable without
+reading the log. Every decision carries its resolved `budget_cap`; `safety_gate`
+annotates why a selection deviated from a plain budget fill (`critical_mandatory`,
+`high_confidence_high_severity`, `low_value_high_redundancy`, or NULL for budget
+truncation). Selection under the review budget and safety gates (§7) resolved the
+Phase 9 budget controller: the cap comes from the review's `RiskClass`
+(`review_budget_low/medium/high` = 5/10/20; a review with no risk-class metadata gets
+the high cap and a supervisor note), the cap is filled by ARUM rank after the gates,
+and the result is also rolled up on the review row (`selected_count`,
+`suppressed_count`) with a supervisor note that publication is a later phase.
 
 ### 3.10 `developer_feedback`
 | column | type | notes |

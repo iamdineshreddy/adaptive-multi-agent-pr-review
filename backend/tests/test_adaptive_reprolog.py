@@ -62,6 +62,7 @@ def test_memory_trace_appends_and_reads() -> None:
         "inputs_hash",
         "budget_cap",
         "safety_gate",
+        "selected",
     }
 
 
