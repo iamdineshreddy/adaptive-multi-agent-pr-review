@@ -193,6 +193,13 @@ Indexes: `(review_id)`, `(repository_id, file_path)`, `(duplicate_group)`,
 | max_pairwise_similarity | numeric | |
 | created_at | timestamptz | |
 
+Phase 7 behaviour: a `finding_groups` row is created **only** for cross-agent
+duplicates (`member_count >= 2`, `redundancy_method` = `hybrid: embedding cosine +
+category + proximity`); singleton findings keep `findings.duplicate_group` NULL.
+Because `findings.duplicate_group` and `finding_groups.representative_finding_id`
+form a bi-directional FK, inserts are ordered findings (NULL group) → group rows →
+group-id write-back on the member findings.
+
 ### 3.9 `developer_feedback`
 | column | type | notes |
 | --- | --- | --- |
@@ -337,7 +344,7 @@ policy and by the data layer, with a dedicated test for repository isolation.
 
 ## 6. Migration workflow
 
-Alembic with async engine. Migrations in `backend/app/database/migrations`. Rules:
+Alembic with async engine. Migrations in `backend/alembic/versions/`. Rules:
 - one revision per logical change;
 - destructive operations (`drop`, `rename`) in separate forward-only revisions;
 - `pgvector` enabled via migration-created extension;

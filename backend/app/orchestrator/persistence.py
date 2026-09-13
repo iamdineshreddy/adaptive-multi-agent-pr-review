@@ -15,10 +15,21 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any, Protocol
 
+from sqlalchemy import text as sa_text
+
 from app.config.settings import get_settings
+from app.consolidation.datatypes import EmbeddingWrite, FindingGroupWrite, FindingWrite
+from app.consolidation.similarity import vector_sql_literal
 from app.database import SessionFactory
-from app.models import Agent, AgentMetric, Review, ReviewTask
-from app.models.enums import ReviewStatus, TaskStatus
+from app.models import (
+    Agent,
+    AgentMetric,
+    Finding,
+    FindingGroup,
+    Review,
+    ReviewTask,
+)
+from app.models.enums import FindingStatus, ReviewStatus, Severity, TaskStatus
 
 
 @dataclass(frozen=True)
@@ -72,6 +83,24 @@ class OrchestratorStore(Protocol):
         stats: Mapping[str, Any],
     ) -> None: ...
 
+    async def create_findings(
+        self, review_id: object, rows: Sequence[FindingWrite]
+    ) -> None: ...
+
+    async def create_finding_group(
+        self, review_id: object, group: FindingGroupWrite
+    ) -> None: ...
+
+    async def create_embeddings(
+        self, review_id: object, rows: Sequence[EmbeddingWrite]
+    ) -> None: ...
+
+    async def update_finding_duplicates(
+        self,
+        review_id: object,
+        updates: Sequence[tuple[str, str]],
+    ) -> None: ...
+
 
 class MemoryOrchestratorStore:
     """In-process, deterministic store for unit tests and local debugging."""
@@ -81,6 +110,9 @@ class MemoryOrchestratorStore:
         self.agents: dict[str, str] = {}
         self.tasks: list[dict[str, Any]] = []
         self.metrics: list[dict[str, Any]] = []
+        self.findings: list[dict[str, Any]] = []
+        self.finding_groups: list[dict[str, Any]] = []
+        self.embeddings: list[dict[str, Any]] = []
 
     async def transition(
         self,
@@ -152,6 +184,75 @@ class MemoryOrchestratorStore:
                 "stats": dict(stats),
             }
         )
+
+    async def create_findings(
+        self, review_id: object, rows: Sequence[FindingWrite]
+    ) -> None:
+        for row in rows:
+            self.findings.append(
+                {
+                    "id": row.id,
+                    "review_id": str(review_id),
+                    "repository_id": row.repository_id,
+                    "agent_key": row.agent_key,
+                    "agent_id": row.agent_id,
+                    "file_path": row.file_path,
+                    "line_start": row.line_start,
+                    "line_end": row.line_end,
+                    "category": row.category,
+                    "severity": row.severity,
+                    "confidence": row.confidence,
+                    "title": row.title,
+                    "description": row.description,
+                    "evidence": dict(row.evidence),
+                    "suggested_fix": row.suggested_fix,
+                    "reason_summary": row.reason_summary,
+                    "duplicate_group": None,
+                    "publication_status": FindingStatus.CANDIDATE.value,
+                }
+            )
+
+    async def create_finding_group(
+        self, review_id: object, group: FindingGroupWrite
+    ) -> None:
+        self.finding_groups.append(
+            {
+                "id": group.id,
+                "review_id": str(review_id),
+                "representative_finding_id": group.representative_finding_id,
+                "member_count": group.member_count,
+                "redundancy_method": group.redundancy_method,
+                "max_pairwise_similarity": group.max_pairwise_similarity,
+            }
+        )
+
+    async def create_embeddings(
+        self, review_id: object, rows: Sequence[EmbeddingWrite]
+    ) -> None:
+        for row in rows:
+            self.embeddings.append(
+                {
+                    "id": str(uuid.uuid4()),
+                    "review_id": str(review_id),
+                    "repository_id": row.repository_id,
+                    "finding_id": row.finding_id,
+                    "resource_type": "finding",
+                    "content_hash": row.content_hash,
+                    "vector": list(row.vector),
+                    "model": row.model,
+                }
+            )
+
+    async def update_finding_duplicates(
+        self,
+        review_id: object,
+        updates: Sequence[tuple[str, str]],
+    ) -> None:
+        for finding_id, group_id in updates:
+            for row in self.findings:
+                if row["id"] == finding_id and row["review_id"] == str(review_id):
+                    row["duplicate_group"] = group_id
+                    break
 
 
 class SqlOrchestratorStore:
@@ -269,6 +370,102 @@ class SqlOrchestratorStore:
                     error=stats.get("error"),
                 )
             )
+
+    async def create_findings(
+        self, review_id: object, rows: Sequence[FindingWrite]
+    ) -> None:
+        rid = uuid.UUID(str(review_id))
+        async with self._session_factory() as session, session.begin():
+            for row in rows:
+                session.add(
+                    Finding(
+                        id=uuid.UUID(row.id),
+                        review_id=rid,
+                        repository_id=uuid.UUID(row.repository_id),
+                        agent_id=uuid.UUID(row.agent_id),
+                        file_path=row.file_path,
+                        line_start=row.line_start,
+                        line_end=row.line_end,
+                        category=row.category,
+                        severity=Severity(row.severity),
+                        confidence=row.confidence,
+                        title=row.title,
+                        description=row.description,
+                        evidence=dict(row.evidence),
+                        suggested_fix=row.suggested_fix,
+                        agent_reasoning_summary=row.reason_summary,
+                        publication_status=FindingStatus.CANDIDATE,
+                        feedback_labelled=False,
+                        temporal_weight=1.0,
+                    )
+                )
+
+    async def create_finding_group(
+        self, review_id: object, group: FindingGroupWrite
+    ) -> None:
+        rid = uuid.UUID(str(review_id))
+        async with self._session_factory() as session, session.begin():
+            session.add(
+                FindingGroup(
+                    id=uuid.UUID(group.id),
+                    review_id=rid,
+                    representative_finding_id=uuid.UUID(
+                        group.representative_finding_id
+                    ),
+                    member_count=group.member_count,
+                    redundancy_method=group.redundancy_method,
+                    max_pairwise_similarity=group.max_pairwise_similarity,
+                )
+            )
+
+    async def create_embeddings(
+        self, review_id: object, rows: Sequence[EmbeddingWrite]
+    ) -> None:
+        # The vector is written as a pgvector text literal cast server-side. This
+        # deliberately avoids the pgvector asyncpg codec (registered in Phase 14,
+        # see ``app.database``); the floats are provider-produced, so interpolating
+        # them is safe and keeps the SQL store fully unit-testable offline.
+        async with self._session_factory() as session, session.begin():
+            for row in rows:
+                vector_cast = f"'{vector_sql_literal(row.vector)}'::vector"
+                statement = sa_text(
+                    "INSERT INTO embeddings "
+                    "(id, repository_id, finding_id, resource_type, content_hash, "
+                    "vector, model) VALUES (:id, :repository_id, :finding_id, "
+                    " 'finding', :content_hash, " + vector_cast + ", :model)"
+                )
+                await session.execute(
+                    statement,
+                    {
+                        "id": uuid.uuid4(),
+                        "repository_id": uuid.UUID(row.repository_id),
+                        "finding_id": uuid.UUID(row.finding_id),
+                        "content_hash": row.content_hash,
+                        "model": row.model,
+                    },
+                )
+
+    async def update_finding_duplicates(
+        self,
+        review_id: object,
+        updates: Sequence[tuple[str, str]],
+    ) -> None:
+        # The findings <=> finding_groups foreign keys are bi-directional, so the
+        # group id is written back here *after* the group rows exist.
+        rid = uuid.UUID(str(review_id))
+        async with self._session_factory() as session, session.begin():
+            for finding_id, group_id in updates:
+                await session.execute(
+                    sa_text(
+                        "UPDATE findings SET duplicate_group = :group_id "
+                        "WHERE id = :finding_id AND review_id = :review_id"
+                    ),
+                    {
+                        "group_id": uuid.UUID(group_id),
+                        "finding_id": uuid.UUID(finding_id),
+                        "review_id": rid,
+                    },
+                )
 
     @staticmethod
     def _int(value: object) -> int:

@@ -40,6 +40,29 @@ def _success(key: str, *, findings=()) -> RunnerResult:
     return RunnerResult(key, success=True, findings=findings, stats={"duration_ms": 3})
 
 
+def _finding(
+    *,
+    file_path: str = "app/auth.py",
+    category: str = "security/xss",
+    severity: str = "HIGH",
+    confidence: float = 0.9,
+    line_start: int | None = None,
+    line_end: int | None = None,
+) -> dict:
+    """A fully contract-valid finding dict (docs/AGENTS.md §4)."""
+    return {
+        "file_path": file_path,
+        "category": category,
+        "severity": severity,
+        "confidence": confidence,
+        "title": "XSS risk in login view",
+        "description": "User-controlled input reaches the response unescaped.",
+        "reason_summary": "Evidence-only summary.",
+        "line_start": line_start,
+        "line_end": line_end,
+    }
+
+
 @pytest.fixture
 def valid_scope() -> AgentScope:
     return AgentScope(
@@ -73,17 +96,12 @@ def settings() -> Settings:
     return Settings(orchestrator_max_agent_retries=2)
 
 
-async def test_success_with_findings_lands_on_consolidating_checkpoint(
+async def test_success_with_findings_lands_on_deciding_checkpoint(
     valid_scope: AgentScope, settings: Settings
 ) -> None:
     runner = ScriptedRunner(
         {
-            "security": [
-                _success(
-                    "security",
-                    findings=({"file_path": "app/auth.py", "severity": "HIGH"},),
-                )
-            ],
+            "security": [_success("security", findings=(_finding(),))],
             "quality": [_success("quality")],
         }
     )
@@ -92,18 +110,31 @@ async def test_success_with_findings_lands_on_consolidating_checkpoint(
         valid_scope, runner=runner, store=store, settings=settings
     )
 
-    assert outcome.status == ReviewStatus.CONSOLIDATING.value
+    assert outcome.status == ReviewStatus.DECIDING.value
     assert len(outcome.findings) == 1
     assert sorted(outcome.agent_keys) == ["quality", "security"]
 
     record = store.reviews[str(REVIEW_ID)]
-    assert record["status"] == "CONSOLIDATING"
+    assert record["status"] == "DECIDING"
     statuses = [h["status"] for h in record["status_history"]]
-    assert statuses == ["PROCESSING", "AGENTS_RUNNING", "CONSOLIDATING"]
+    assert statuses == ["PROCESSING", "AGENTS_RUNNING", "DECIDING"]
     assert len(store.tasks) == 2
     assert all(t["status"] == TaskStatus.SUCCESS.value for t in store.tasks)
     assert len(store.metrics) == 2
     assert "completed_at" not in store.reviews[str(REVIEW_ID)]  # checkpoint: not done
+
+    # Phase 7: the candidate is consolidated into the store, embedded, and the
+    # review is handed to the decision layer only after that succeeded.
+    assert len(store.findings) == 1
+    assert store.findings[0]["publication_status"] == "CANDIDATE"
+    assert store.findings[0]["duplicate_group"] is None  # singleton: no group
+    assert len(store.finding_groups) == 0
+    assert len(store.embeddings) == 1
+    assert store.embeddings[0]["finding_id"] == store.findings[0]["id"]
+    assert store.embeddings[0]["model"] == "mock/text-embedding"
+    supervisor_notes = record["supervisor_notes"]
+    assert any("consolidated 1 findings" in note for note in supervisor_notes)
+    assert any("handed to decision" in note for note in supervisor_notes)
 
 
 async def test_success_without_findings_completes(
@@ -128,12 +159,7 @@ async def test_permanent_failure_diagnoses_failed_and_keeps_partial_findings(
 ) -> None:
     runner = ScriptedRunner(
         {
-            "security": [
-                _success(
-                    "security",
-                    findings=({"file_path": "app/auth.py", "severity": "MEDIUM"},),
-                )
-            ],
+            "security": [_success("security", findings=(_finding(severity="MEDIUM"),))],
             "quality": [
                 RunnerResult(
                     "quality", success=False, retryable=False, error="hard boom"
@@ -158,6 +184,13 @@ async def test_permanent_failure_diagnoses_failed_and_keeps_partial_findings(
     assert tasks_by_key["security"]["status"] == TaskStatus.SUCCESS.value
     assert tasks_by_key["quality"]["status"] == TaskStatus.FAILED.value
     assert tasks_by_key["quality"]["last_error"] == "hard boom"
+
+    # The partial valid finding is consolidated before the review is diagnosed
+    # FAILED (docs/AGENTS.md §2: partial valid findings still flow to the
+    # consolidation layer).
+    assert len(store.findings) == 1
+    assert store.findings[0]["severity"] == "MEDIUM"
+    assert len(store.embeddings) == 1
 
 
 async def test_retry_exhaustion_records_retries_and_note(
@@ -217,7 +250,7 @@ async def test_outcome_is_json_serialisable(
     import json
 
     runner = ScriptedRunner(
-        {"security": [_success("security", findings=({"file_path": "app/auth.py"},))]}
+        {"security": [_success("security", findings=(_finding(),))]}
     )
     outcome = await run_review(
         valid_scope,
@@ -227,4 +260,4 @@ async def test_outcome_is_json_serialisable(
     )
     payload = outcome.to_dict()
     json.dumps(payload)  # must not raise
-    assert payload["status"] == ReviewStatus.CONSOLIDATING.value
+    assert payload["status"] == ReviewStatus.DECIDING.value

@@ -90,6 +90,11 @@ class Settings(BaseSettings):
     orchestrator_max_agent_retries: int = 2  # bounded agent retries on transient errors
     orchestrator_agent_timeout_seconds: float = 120.0  # hard per-agent wall-clock cap
 
+    # --- Consolidation & redundancy (docs/ARCHITECTURE.md §4.5) --------------
+    embeddings_provider: str = "mock"  # "mock" (offline/deterministic) | "openai"
+    consolidation_similarity_threshold: float = 0.85  # cosine threshold to group
+    consolidation_max_line_gap: int = 5  # max gap between two ranges to group
+
     # --- Observability -------------------------------------------------------
     langfuse_public_key: str = ""
     langfuse_secret_key: str = ""

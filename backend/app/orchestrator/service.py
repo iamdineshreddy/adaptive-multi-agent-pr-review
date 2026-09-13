@@ -20,6 +20,12 @@ import structlog
 from app.agents.contract import AgentScope, scope_validation_error
 from app.agents.registry import agent_metadata, queue_for_agent
 from app.config.settings import Settings, get_settings
+from app.consolidation import (
+    build_embeddings_provider,
+    consolidate_review,
+    normalise_findings,
+)
+from app.consolidation.embeddings import EmbeddingsProvider
 from app.models.enums import ReviewStatus, TaskStatus
 from app.orchestrator.graph import build_orchestration_graph
 from app.orchestrator.persistence import (
@@ -65,6 +71,7 @@ class RunContext:
     runner: AgentRunner
     store: OrchestratorStore
     settings: Settings
+    embeddings_provider: EmbeddingsProvider | None = None
     started_at: datetime = field(default_factory=lambda: utc_now())
 
 
@@ -74,18 +81,22 @@ async def run_review(
     runner: AgentRunner | None = None,
     store: OrchestratorStore | None = None,
     settings: Settings | None = None,
+    embeddings_provider: EmbeddingsProvider | None = None,
 ) -> ReviewOutcome:
     """Execute the orchestration graph over ``scope`` and persist its outcome.
 
     ``runner`` defaults to the in-process runner (tests/local), ``store`` to
     the PostgreSQL store (production). DB-free unit tests inject a
-    :class:`MemoryOrchestratorStore` and a mock-backed runner.
+    :class:`MemoryOrchestratorStore` and a mock-backed runner. Consolidation
+    (Phase 7) uses ``embeddings_provider`` (default: built from settings; the
+    ``mock`` provider keeps local runs offline and deterministic).
     """
     cfg = settings or get_settings()
     ctx = RunContext(
         runner=runner or InProcessAgentRunner(),
         store=store or MemoryOrchestratorStore(),
         settings=cfg,
+        embeddings_provider=embeddings_provider,
     )
     review_id = str(uuid.UUID(str(scope.review_id)))
     started = time.monotonic()
@@ -141,6 +152,7 @@ async def _persist(
     now: datetime = utc_now()
     tasks: list[dict[str, Any]] = []
     findings: list[dict[str, Any]] = []
+    agent_inputs: list[tuple[str, str, dict[str, Any]]] = []
     notes = list(final.get("notes") or [])
 
     for key in final["plan"].get("agent_keys") or []:
@@ -175,6 +187,9 @@ async def _persist(
             }
         )
         if success is not None:
+            for finding in success["findings"] or []:
+                if isinstance(finding, dict):
+                    agent_inputs.append((key, agent_ids[key], finding))
             findings.extend(success["findings"] or [])
             if success.get("stats"):
                 await ctx.store.create_agent_metric(
@@ -187,10 +202,26 @@ async def _persist(
     for note in notes:
         await ctx.store.append_note(review_id, note)
 
+    consolidation_error: str | None = None
+    consolidated = False
+    if agent_inputs:
+        consolidated, consolidation_error = await _consolidate_findings(
+            ctx, review_id, scope, agent_inputs
+        )
+
     terminal = final.get("terminal")
     permanent_failures = bool(final.get("failed"))
     root_cause = final.get("root_cause")
-    if permanent_failures or terminal == TERMINAL_FAILED:
+    if consolidation_error is not None:
+        review_status = ReviewStatus.FAILED
+        await ctx.store.transition(
+            review_id,
+            review_status,
+            failure_reason=consolidation_error,
+            root_cause=consolidation_error,
+            completed_at=now,
+        )
+    elif permanent_failures or terminal == TERMINAL_FAILED:
         review_status = ReviewStatus.FAILED
         await ctx.store.transition(
             review_id,
@@ -199,8 +230,8 @@ async def _persist(
             root_cause=root_cause,
             completed_at=now,
         )
-    elif findings:
-        review_status = ReviewStatus.CONSOLIDATING  # checkpoint: Phase 7 consumes this
+    elif consolidated:
+        review_status = ReviewStatus.DECIDING  # checkpoint: Phase 8 consumes this
         await ctx.store.transition(review_id, review_status)
     else:
         review_status = ReviewStatus.COMPLETED
@@ -213,9 +244,76 @@ async def _persist(
         findings=findings,
         tasks=tasks,
         notes=notes,
-        root_cause=root_cause if permanent_failures else None,
+        root_cause=(root_cause if permanent_failures else consolidation_error),
         duration_ms=duration_ms,
     )
+
+
+async def _consolidate_findings(
+    ctx: RunContext,
+    review_id: str,
+    scope: AgentScope,
+    agent_inputs: list[tuple[str, str, dict[str, Any]]],
+) -> tuple[bool, str | None]:
+    """Consolidate + de-duplicate agent findings and persist the candidates.
+
+    Returns ``(any_persisted, error)``. Any failure returns an error string so
+    the review is diagnosed ``FAILED`` instead of silently completed; partial
+    valid findings still reach the decision layer on failure (AGENTS.md §2/§6).
+    """
+    try:
+        provider = ctx.embeddings_provider or build_embeddings_provider(ctx.settings)
+    except Exception as exc:  # noqa: BLE001 - provider construction failure
+        return False, f"consolidation provider failed: {exc}"
+
+    normalised = normalise_findings(
+        str(scope.review_id), str(scope.repository_id), agent_inputs
+    )
+    if normalised.errors:
+        await ctx.store.append_note(
+            review_id,
+            "supervisor: consolidation dropped "
+            f"{len(normalised.errors)} invalid/duplicate items "
+            f"(first: {normalised.errors[0]}).",
+        )
+    if not normalised.findings:
+        return False, None
+
+    try:
+        summary = await consolidate_review(
+            str(scope.review_id),
+            normalised.findings,
+            provider,
+            similarity_threshold=ctx.settings.consolidation_similarity_threshold,
+            max_line_gap=ctx.settings.consolidation_max_line_gap,
+        )
+    except Exception as exc:  # noqa: BLE001 - provider/vector failures surface
+        return False, f"redundancy detection failed: {exc}"
+
+    try:
+        await ctx.store.create_findings(review_id, summary.findings)
+        for group in summary.groups:
+            await ctx.store.create_finding_group(review_id, group)
+        grouped_members = [
+            (row.id, row.duplicate_group)
+            for row in summary.findings
+            if row.duplicate_group
+        ]
+        if grouped_members:
+            await ctx.store.update_finding_duplicates(review_id, grouped_members)
+        if summary.embeddings:
+            await ctx.store.create_embeddings(review_id, summary.embeddings)
+    except Exception as exc:  # noqa: BLE001 - persistence failures surface
+        return False, f"persisting consolidated findings failed: {exc}"
+
+    await ctx.store.append_note(
+        review_id,
+        "supervisor: consolidated "
+        f"{len(summary.findings)} findings into "
+        f"{len(summary.groups)} redundancy groups "
+        f"(dropped={normalised.dropped}); handed to decision (Phase 8).",
+    )
+    return True, None
 
 
 async def _fail_early(

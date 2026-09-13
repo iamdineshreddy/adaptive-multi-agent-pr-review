@@ -167,7 +167,7 @@ datasets/           Dataset registration and processing scripts
 
 ## Current status
 
-**Phase 6 complete — supervisor + LangGraph orchestration with retry/failure paths.**
+**Phase 7 complete — finding consolidation + cross-agent redundancy detection (embeddings + cosine + proximity).**
 
 - Phase 0: full design documentation (`docs/`).
 - Phase 1: requirements frozen (`docs/REQUIREMENTS.md`), backend package installed
@@ -211,9 +211,24 @@ datasets/           Dataset registration and processing scripts
   and `agent_metrics`, an `orchestrator.run_review` Celery task on
   `review_task_queue` with live DB + GitHub scope rebuild, and `queue.pop_and_dispatch`
   handing the popped priority review to the orchestrator. Terminal mapping: COMPLETE
-  with findings → `CONSOLIDATING` (Phase 7 checkpoint), no findings → `COMPLETED`,
+  with findings → `DECIDING` (Phase 8 checkpoint), no findings → `COMPLETED`,
   permanent failure → `FAILED`. Migration `0004_orchestrator_notes`. 201 tests:
   193 pass (8 live-dependency tests self-skip without PostgreSQL/Redis).
+- Phase 7: Finding consolidation + cross-agent redundancy detection
+  (`backend/app/consolidation/`) — a broker/DB-free kernel that normalises raw
+  agent findings, embeds them via a pluggable provider (`MockEmbeddingsProvider`
+  by default, deterministic and L2-normalised; `OpenAIEmbeddingsProvider` when
+  configured) and groups duplicates with a greedy hybrid rule (embedding cosine ≥
+  `consolidation_similarity_threshold`, category-aligned, same file, line ranges
+  within `consolidation_max_line_gap`). Only multi-agent duplicates (member_count
+  ≥ 2) persist `finding_groups` rows with a research-safe method string;
+  singletons stay ungrouped. Findings/groups/embeddings persist through the
+  `OrchestratorStore` (Memory + Sql; `update_finding_duplicates` resolves the
+  bi-directional FK; SQL embeddings use a server-side pgvector literal cast until
+  the asyncpg codec in Phase 14). Success lands on the `DECIDING` checkpoint
+  (Phase 8); permanent failures still keep partial valid findings. Migration
+  `0005_embeddings_hnsw`. 249 tests: 240 pass (9 live-dependency tests self-skip
+  without PostgreSQL/Redis).
 
 Remaining phases (7–19) are tracked in `docs/ROADMAP.md`. Features not yet implemented
 are NOT claimed.
