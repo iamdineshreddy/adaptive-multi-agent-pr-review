@@ -96,6 +96,12 @@ module = ["app.orchestrator.tasks"]
 disable_error_code = ["untyped-decorator", "no-untyped-def", "no-any-return"]
 
 [[tool.mypy.overrides]]
+# LightGBM/numpy ship no strict type stubs; the adaptive training path imports
+# them lazily inside guarded functions and treats them as external deps.
+module = ["lightgbm", "numpy"]
+ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
 # LangGraph's add_node/add_conditional_edges overloads reject explicitly-typed
 # OrchestrationState node callables; the topology is proven by the orchestrator
 # graph tests, so these wiring calls skip mypy's overload resolution.

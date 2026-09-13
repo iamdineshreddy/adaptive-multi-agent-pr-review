@@ -17,6 +17,19 @@ from typing import Any
 
 import structlog
 
+from app.adaptive import (
+    Decision,
+    DecisionTrace,
+    MemoryDecisionTrace,
+    compute_inputs_hash,
+    disagreement_variance,
+    extract_features,
+    load_weights,
+    rank_decisions,
+    utility,
+)
+from app.adaptive.features import ArumFeatures
+from app.adaptive.weights import ArumWeights
 from app.agents.contract import AgentScope, scope_validation_error
 from app.agents.registry import agent_metadata, queue_for_agent
 from app.config.settings import Settings, get_settings
@@ -25,6 +38,7 @@ from app.consolidation import (
     consolidate_review,
     normalise_findings,
 )
+from app.consolidation.datatypes import ConsolidationSummary, FindingWrite
 from app.consolidation.embeddings import EmbeddingsProvider
 from app.models.enums import ReviewStatus, TaskStatus
 from app.orchestrator.graph import build_orchestration_graph
@@ -72,6 +86,7 @@ class RunContext:
     store: OrchestratorStore
     settings: Settings
     embeddings_provider: EmbeddingsProvider | None = None
+    trace: DecisionTrace | None = None
     started_at: datetime = field(default_factory=lambda: utc_now())
 
 
@@ -82,6 +97,7 @@ async def run_review(
     store: OrchestratorStore | None = None,
     settings: Settings | None = None,
     embeddings_provider: EmbeddingsProvider | None = None,
+    trace: DecisionTrace | None = None,
 ) -> ReviewOutcome:
     """Execute the orchestration graph over ``scope`` and persist its outcome.
 
@@ -89,7 +105,9 @@ async def run_review(
     the PostgreSQL store (production). DB-free unit tests inject a
     :class:`MemoryOrchestratorStore` and a mock-backed runner. Consolidation
     (Phase 7) uses ``embeddings_provider`` (default: built from settings; the
-    ``mock`` provider keeps local runs offline and deterministic).
+    ``mock`` provider keeps local runs offline and deterministic). ARUM
+    decision traces (Phase 8) go to ``trace`` — a file-backed writer in
+    production, an in-memory sink by default in tests.
     """
     cfg = settings or get_settings()
     ctx = RunContext(
@@ -97,6 +115,7 @@ async def run_review(
         store=store or MemoryOrchestratorStore(),
         settings=cfg,
         embeddings_provider=embeddings_provider,
+        trace=trace,
     )
     review_id = str(uuid.UUID(str(scope.review_id)))
     started = time.monotonic()
@@ -204,14 +223,25 @@ async def _persist(
 
     consolidation_error: str | None = None
     consolidated = False
+    summary: ConsolidationSummary | None = None
     if agent_inputs:
-        consolidated, consolidation_error = await _consolidate_findings(
+        consolidated, consolidation_error, summary = await _consolidate_findings(
             ctx, review_id, scope, agent_inputs
         )
 
+    decision_error: str | None = None
     terminal = final.get("terminal")
     permanent_failures = bool(final.get("failed"))
     root_cause = final.get("root_cause")
+    if (
+        consolidated
+        and summary is not None
+        and consolidation_error is None
+        and not permanent_failures
+        and terminal != TERMINAL_FAILED
+    ):
+        decision_error = await _decide_findings(ctx, review_id, summary)
+
     if consolidation_error is not None:
         review_status = ReviewStatus.FAILED
         await ctx.store.transition(
@@ -219,6 +249,15 @@ async def _persist(
             review_status,
             failure_reason=consolidation_error,
             root_cause=consolidation_error,
+            completed_at=now,
+        )
+    elif decision_error is not None:
+        review_status = ReviewStatus.FAILED
+        await ctx.store.transition(
+            review_id,
+            review_status,
+            failure_reason=decision_error,
+            root_cause=decision_error,
             completed_at=now,
         )
     elif permanent_failures or terminal == TERMINAL_FAILED:
@@ -231,7 +270,7 @@ async def _persist(
             completed_at=now,
         )
     elif consolidated:
-        review_status = ReviewStatus.DECIDING  # checkpoint: Phase 8 consumes this
+        review_status = ReviewStatus.DECIDING  # checkpoint: Phase 9 consumes this
         await ctx.store.transition(review_id, review_status)
     else:
         review_status = ReviewStatus.COMPLETED
@@ -244,8 +283,108 @@ async def _persist(
         findings=findings,
         tasks=tasks,
         notes=notes,
-        root_cause=(root_cause if permanent_failures else consolidation_error),
+        root_cause=(
+            root_cause
+            if (permanent_failures or terminal == TERMINAL_FAILED)
+            else (consolidation_error or decision_error)
+        ),
         duration_ms=duration_ms,
+    )
+
+
+async def _decide_findings(
+    ctx: RunContext,
+    review_id: str,
+    summary: ConsolidationSummary,
+) -> str | None:
+    """Score consolidated candidates with ARUM; persist features/utility.
+
+    Returns ``None`` on success or an error string that diagnoses the review
+    ``FAILED`` (consistent with the consolidation policy: nothing is silently
+    dropped from the decision trail). Selection under the review budget plus
+    safety gates is Phase 9; candidates stay ``CANDIDATE`` here and each one is
+    logged to the reproducibility trace in ranked order.
+    """
+    try:
+        weights = load_weights(version=ctx.settings.arum_weights_version)
+        decisions = _score_candidates(review_id, summary, weights)
+        ranked = rank_decisions(decisions)
+        trace = ctx.trace or MemoryDecisionTrace()
+        for decision in ranked:
+            trace.append(decision)
+            await ctx.store.apply_decision(review_id, decision)
+        await ctx.store.record_decision(review_id, arum_version=weights.version)
+        await ctx.store.append_note(
+            review_id,
+            "supervisor: ARUM scored "
+            f"{len(summary.findings)} candidates "
+            f"(version={weights.version}, utility in trace); "
+            "budget selection + safety gates are Phase 9.",
+        )
+        return None
+    except Exception as exc:  # noqa: BLE001 - any decision failure must surface
+        return f"ARUM decision failed: {exc}"
+
+
+def _score_candidates(
+    review_id: str,
+    summary: ConsolidationSummary,
+    weights: ArumWeights,
+) -> list[Decision]:
+    """Build one :class:`Decision` per candidate from the merged summary.
+
+    Singletons are scored alone (member_count 1); grouped findings use the
+    redundancy group's member set for agent agreement + disagreement variance.
+    """
+    decisions: list[Decision] = []
+    for group in summary.groups:
+        members = [row for row in summary.findings if row.duplicate_group == group.id]
+        if not members:
+            raise RuntimeError(f"redundancy group {group.id} has no persisted members")
+        representative = next(
+            (row for row in members if row.id == group.representative_finding_id),
+            members[0],
+        )
+        distinct_agents = len({row.agent_key for row in members})
+        variance = disagreement_variance(members)
+        features = extract_features(
+            representative,
+            member_count=group.member_count,
+            distinct_agents=distinct_agents,
+            variance=variance,
+        )
+        decisions.append(
+            _decision(review_id, representative, group.id, features, weights)
+        )
+    for row in summary.findings:
+        if row.duplicate_group is None:
+            features = extract_features(
+                row, member_count=1, distinct_agents=1, variance=0.0
+            )
+            decisions.append(_decision(review_id, row, None, features, weights))
+    return decisions
+
+
+def _decision(
+    review_id: str,
+    finding: FindingWrite,
+    group_id: str | None,
+    features: ArumFeatures,
+    weights: ArumWeights,
+) -> Decision:
+    score = utility(features, weights)
+    inputs_hash = compute_inputs_hash(
+        "finding", review_id, finding.id, features.as_vector(), weights.as_vector()
+    )
+    return Decision(
+        review_id=review_id,
+        finding_id=finding.id,
+        group_id=group_id,
+        arum_version=weights.version,
+        features=features,
+        utility=score,
+        weights=weights,
+        inputs_hash=inputs_hash,
     )
 
 
@@ -254,17 +393,18 @@ async def _consolidate_findings(
     review_id: str,
     scope: AgentScope,
     agent_inputs: list[tuple[str, str, dict[str, Any]]],
-) -> tuple[bool, str | None]:
+) -> tuple[bool, str | None, ConsolidationSummary | None]:
     """Consolidate + de-duplicate agent findings and persist the candidates.
 
-    Returns ``(any_persisted, error)``. Any failure returns an error string so
-    the review is diagnosed ``FAILED`` instead of silently completed; partial
-    valid findings still reach the decision layer on failure (AGENTS.md §2/§6).
+    Returns ``(any_persisted, error, summary)``. Any failure returns an error
+    string so the review is diagnosed ``FAILED`` instead of silently completed;
+    partial valid findings still reach the decision layer on failure
+    (AGENTS.md §2/§6).
     """
     try:
         provider = ctx.embeddings_provider or build_embeddings_provider(ctx.settings)
     except Exception as exc:  # noqa: BLE001 - provider construction failure
-        return False, f"consolidation provider failed: {exc}"
+        return False, f"consolidation provider failed: {exc}", None
 
     normalised = normalise_findings(
         str(scope.review_id), str(scope.repository_id), agent_inputs
@@ -277,7 +417,7 @@ async def _consolidate_findings(
             f"(first: {normalised.errors[0]}).",
         )
     if not normalised.findings:
-        return False, None
+        return False, None, None
 
     try:
         summary = await consolidate_review(
@@ -288,7 +428,7 @@ async def _consolidate_findings(
             max_line_gap=ctx.settings.consolidation_max_line_gap,
         )
     except Exception as exc:  # noqa: BLE001 - provider/vector failures surface
-        return False, f"redundancy detection failed: {exc}"
+        return False, f"redundancy detection failed: {exc}", None
 
     try:
         await ctx.store.create_findings(review_id, summary.findings)
@@ -304,7 +444,7 @@ async def _consolidate_findings(
         if summary.embeddings:
             await ctx.store.create_embeddings(review_id, summary.embeddings)
     except Exception as exc:  # noqa: BLE001 - persistence failures surface
-        return False, f"persisting consolidated findings failed: {exc}"
+        return False, f"persisting consolidated findings failed: {exc}", None
 
     await ctx.store.append_note(
         review_id,
@@ -313,7 +453,7 @@ async def _consolidate_findings(
         f"{len(summary.groups)} redundancy groups "
         f"(dropped={normalised.dropped}); handed to decision (Phase 8).",
     )
-    return True, None
+    return True, None, summary
 
 
 async def _fail_early(

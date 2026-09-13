@@ -62,6 +62,9 @@ class Settings(BaseSettings):
     arum_weights_version: str = "v1"
     arum_temporal_decay_days: int = 90
     arum_decay_lambda: float = 1.0
+    # Reproducibility log (docs/EXPERIMENTS.md §5); empty writes traces only to
+    # the in-memory sink (unit tests) until a path is configured for prod.
+    arum_decision_log_path: str = ""
 
     # --- Review budget (configurable caps) ----------------------------------
     review_budget_low: int = 5

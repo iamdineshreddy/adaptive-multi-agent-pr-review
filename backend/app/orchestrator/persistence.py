@@ -17,6 +17,7 @@ from typing import Any, Protocol
 
 from sqlalchemy import text as sa_text
 
+from app.adaptive.scoring import Decision
 from app.config.settings import get_settings
 from app.consolidation.datatypes import EmbeddingWrite, FindingGroupWrite, FindingWrite
 from app.consolidation.similarity import vector_sql_literal
@@ -100,6 +101,12 @@ class OrchestratorStore(Protocol):
         review_id: object,
         updates: Sequence[tuple[str, str]],
     ) -> None: ...
+
+    async def record_decision(
+        self, review_id: object, *, arum_version: str
+    ) -> None: ...
+
+    async def apply_decision(self, review_id: object, decision: Decision) -> None: ...
 
 
 class MemoryOrchestratorStore:
@@ -253,6 +260,19 @@ class MemoryOrchestratorStore:
                 if row["id"] == finding_id and row["review_id"] == str(review_id):
                     row["duplicate_group"] = group_id
                     break
+
+    async def record_decision(self, review_id: object, *, arum_version: str) -> None:
+        review = self.reviews.get(str(review_id))
+        if review is not None:
+            review["arum_version"] = arum_version
+
+    async def apply_decision(self, review_id: object, decision: Decision) -> None:
+        for row in self.findings:
+            if row["id"] == decision.finding_id:
+                row["arum_features"] = decision.features.as_dict()
+                row["arum_utility"] = decision.utility
+                row["arum_version"] = decision.arum_version
+                break
 
 
 class SqlOrchestratorStore:
@@ -466,6 +486,24 @@ class SqlOrchestratorStore:
                         "review_id": rid,
                     },
                 )
+
+    async def record_decision(self, review_id: object, *, arum_version: str) -> None:
+        rid = uuid.UUID(str(review_id))
+        async with self._session_factory() as session, session.begin():
+            review = await session.get(Review, rid)
+            if review is not None:
+                review.arum_version = arum_version
+
+    async def apply_decision(self, review_id: object, decision: Decision) -> None:
+        rid = uuid.UUID(str(review_id))
+        finding_id = uuid.UUID(decision.finding_id)
+        async with self._session_factory() as session, session.begin():
+            finding = await session.get(Finding, finding_id)
+            if finding is None or finding.review_id != rid:
+                return
+            finding.arum_features = decision.features.as_dict()
+            finding.arum_utility = decision.utility
+            finding.arum_version = decision.arum_version
 
     @staticmethod
     def _int(value: object) -> int:

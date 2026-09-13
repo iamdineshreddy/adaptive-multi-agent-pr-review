@@ -6,12 +6,12 @@ writes through its store before handing the review to the decision layer.
 """
 
 from app.consolidation.consolidate import (
-    ConsolidationSummary,
     NormalisationResult,
     consolidate_review,
     normalise_findings,
 )
 from app.consolidation.datatypes import (
+    ConsolidationSummary,
     EmbeddingWrite,
     FindingGroupWrite,
     FindingWrite,

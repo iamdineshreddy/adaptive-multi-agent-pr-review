@@ -18,7 +18,9 @@ from celery import shared_task
 from celery.exceptions import SoftTimeLimitExceeded
 from celery.utils.log import get_task_logger
 
+from app.adaptive import FileDecisionTrace
 from app.agents.contract import AgentScope
+from app.config.settings import get_settings
 from app.orchestrator.persistence import OrchestratorStore
 from app.orchestrator.runners import AgentRunner
 from app.orchestrator.scope_builder import build_scope_data_for_review
@@ -39,7 +41,13 @@ async def execute_orchestration_core(
     if scope_data is None:
         scope_data = await build_scope_data_for_review(uuid.UUID(review_id))
     scope = AgentScope.from_dict(scope_data)
-    return await run_review(scope, runner=runner, store=store)
+    cfg = get_settings()
+    trace = (
+        FileDecisionTrace(cfg.arum_decision_log_path)
+        if cfg.arum_decision_log_path
+        else None
+    )
+    return await run_review(scope, runner=runner, store=store, trace=trace)
 
 
 @shared_task(bind=True, name="orchestrator.run_review", acks_late=True)

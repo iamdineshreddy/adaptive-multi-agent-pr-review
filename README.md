@@ -167,7 +167,7 @@ datasets/           Dataset registration and processing scripts
 
 ## Current status
 
-**Phase 7 complete — finding consolidation + cross-agent redundancy detection (embeddings + cosine + proximity).**
+**Phase 8 complete — ARUM decision layer (features, scoring, learning path, reproducibility log); projects land on the `DECIDING` checkpoint pending Phase 9 budget + safety gates.**
 
 - Phase 0: full design documentation (`docs/`).
 - Phase 1: requirements frozen (`docs/REQUIREMENTS.md`), backend package installed
@@ -229,8 +229,24 @@ datasets/           Dataset registration and processing scripts
   (Phase 8); permanent failures still keep partial valid findings. Migration
   `0005_embeddings_hnsw`. 249 tests: 240 pass (9 live-dependency tests self-skip
   without PostgreSQL/Redis).
+- Phase 8: ARUM decision layer (`backend/app/adaptive/`) — the `DECIDE (ARUM)`
+  step of AGENTS.md §2. Eight normalised [0,1] features per ARUM.md §2 (severity,
+  confidence, agent agreement, historical actionability, repository relevance,
+  context relevance, redundancy, historical rejection; RAG/feedback-memory
+  features read repo-memory snapshots and default to 0.0 until Phase 10 feeds
+  them), versioned `ArumWeights` (`v1` heuristic prior, strict repo overrides),
+  weighted-linear `utility` + deterministic ranking into `Decision` records, an
+  offline learning path (`fit_logistic` pure-stdlib ablation, primary LightGBM
+  via the `ml` extra with an honest `MlExtraUnavailableError` when absent), and a
+  reproducibility log (deterministic inputs hash; `MemoryDecisionTrace` in tests,
+  JSON-lines `FileDecisionTrace` in production). The orchestrator scores every
+  consolidated candidate, writes `finding.arum_features/arum_utility/arum_version`
+  + `reviews.arum_version`, appends decisions to the trace, and stays on `DECIDING`
+  — budget selection + safety gates are Phase 9. Decision-layer failures diagnose
+  `FAILED` with `root_cause` while preserving partial valid findings. 296 tests:
+  287 pass (9 live-dependency tests self-skip without PostgreSQL/Redis).
 
-Remaining phases (7–19) are tracked in `docs/ROADMAP.md`. Features not yet implemented
+Remaining phases (9–19) are tracked in `docs/ROADMAP.md`. Features not yet implemented
 are NOT claimed.
 
 ---

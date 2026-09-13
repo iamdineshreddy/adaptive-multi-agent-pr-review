@@ -112,7 +112,7 @@ Unique index: `(repository_id, number)`. Index: `priority_score`, `state`, `head
 | github_delivery_id | varchar(64) unique | webhook idempotency key (Phase 3) |
 | failure_reason | text null | reason if terminal FAILED (Phase 4) |
 | budget_cap | int | resolved cap for this review |
-| arum_version | text null | model family used |
+| arum_version | text null | ARUM weights version used by the decision layer (Phase 8) |
 | root_cause | text null | if FAILED |
 | supervisor_notes | jsonb | time-ordered supervisor notes; appended on permanent agent failure (AGENTS.md §2) |
 | status_history | jsonb | time-stamped state-transition trail (ARCHITECTURE.md §4.3) |
@@ -171,9 +171,9 @@ Core detection output. See `docs/ARUM.md` §2 for feature provenance.
 | code_context | text | trimmed source context |
 | agent_reasoning_summary | text | concise, no chain-of-thought |
 | duplicate_group | uuid null | FK finding_groups |
-| arum_features | jsonb | the 8 feature values for this review |
-| arum_utility | numeric null | ARUM score at decision time |
-| arum_version | text null | |
+| arum_features | jsonb | the 8 ARUM feature values at decision time (ARUM.md §2) |
+| arum_utility | numeric null | ARUM score at decision time; set on the representative finding of a redundancy group (members share the group's decision but keep their own row) |
+| arum_version | text null | ARUM weights version used (Phase 8) |
 | publication_status | enum | `candidate` / `scheduled` / `published` / `suppressed` / `resolved` / `stale` |
 | feedback_status | enum null | outcome pending/labelled |
 | temporal_weight | numeric | decay at decision time |
@@ -200,7 +200,18 @@ Because `findings.duplicate_group` and `finding_groups.representative_finding_id
 form a bi-directional FK, inserts are ordered findings (NULL group) → group rows →
 group-id write-back on the member findings.
 
-### 3.9 `developer_feedback`
+### 3.9 ARUM decision provenance
+
+The decision layer (Phase 8, `app/adaptive/`) writes **reproducibility records**
+(ARUM.md §10) as JSON-lines to a file configured by `settings.arum_decision_log_path`
+(one object per `Decision`: review_id, finding_id, group_id, arum_version, features,
+utility, weights, inputs_hash, budget_cap/safety_gate reserved for Phase 9). The files
+are the append-only research trail; `findings.arum_features/arum_utility/arum_version`
+(§3.7) are the denormalised snapshot and `reviews.arum_version` records the weights
+family, so decision-time state is queryable without reading the log. Selection under
+the review budget (`budget_cap`) and safety gates is Phase 9.
+
+### 3.10 `developer_feedback`
 | column | type | notes |
 | --- | --- | --- |
 | id | uuid PK | |
@@ -217,7 +228,7 @@ group-id write-back on the member findings.
 Index: `(finding_id)`, `(repository_id, outcome)`, `(review_id)`,
 `(created_at DESC)` for temporal decay scans.
 
-### 3.10 `repository_memory`
+### 3.11 `repository_memory`
 Per-repo adaptive aggregates (denormalised for read speed; rebuilt on feedback).
 | column | type | notes |
 | --- | --- | --- |
@@ -229,7 +240,7 @@ Per-repo adaptive aggregates (denormalised for read speed; rebuilt on feedback).
 | updated_at | timestamptz | |
 | version | int | monotonic rebuild counter |
 
-### 3.11 `coding_standards`
+### 3.12 `coding_standards`
 | column | type |
 | --- | --- |
 | id | uuid PK |
@@ -243,7 +254,7 @@ Per-repo adaptive aggregates (denormalised for read speed; rebuilt on feedback).
 
 Unique: `(repository_id, rule_key)`.
 
-### 3.12 `embeddings`
+### 3.13 `embeddings`
 `pgvector`-backed rows for candidate findings (used by redundancy + RAG).
 | column | type | notes |
 | --- | --- | --- |
@@ -258,7 +269,7 @@ Unique: `(repository_id, rule_key)`.
 
 Index: HNSW on `vector` (cosine).
 
-### 3.13 `review_iterations`
+### 3.14 `review_iterations`
 | column | type | notes |
 | --- | --- | --- |
 | id | uuid PK | |
@@ -276,7 +287,7 @@ Index: HNSW on `vector` (cosine).
 
 Index: `(review_id, iteration)`.
 
-### 3.14 `agent_metrics`
+### 3.15 `agent_metrics`
 | column | type | notes |
 | --- | --- | --- |
 | id | uuid PK | |
@@ -293,7 +304,7 @@ Index: `(review_id, iteration)`.
 
 Index: `(agent_id, created_at)`.
 
-### 3.15 `system_metrics`
+### 3.16 `system_metrics`
 Aggregate/derived counters (also mirror Prometheus; persisted for research queries).
 | column | type | notes |
 | --- | --- | --- |
@@ -306,7 +317,7 @@ Aggregate/derived counters (also mirror Prometheus; persisted for research queri
 
 Index: `(metric_name, sampled_at)`.
 
-### 3.16 `dead_letters`
+### 3.17 `dead_letters`
 Durable dead-letter log (docs/QUEUE.md §6): tasks that exhausted `max_retries`
 without a silent drop. The Redis dead-letter list is the ephemeral signal; this
 table backs the dashboard/alerting.
