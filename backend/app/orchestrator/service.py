@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import time
 import uuid
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import Any
@@ -35,7 +35,7 @@ from app.adaptive.memory import build_memory_snapshot
 from app.adaptive.rag import max_relevance
 from app.adaptive.weights import ArumWeights
 from app.agents.contract import AgentScope, scope_validation_error
-from app.agents.registry import agent_metadata, queue_for_agent
+from app.agents.registry import agent_keys, agent_metadata, queue_for_agent
 from app.config.settings import Settings, get_settings
 from app.consolidation import (
     build_embeddings_provider,
@@ -50,15 +50,20 @@ from app.consolidation.datatypes import (
     FindingWrite,
 )
 from app.consolidation.embeddings import EmbeddingsProvider
-from app.models.enums import ReviewStatus, RiskClass, TaskStatus
+from app.models.enums import ReviewMode, ReviewStatus, RiskClass, TaskStatus
 from app.orchestrator.graph import build_orchestration_graph
+from app.orchestrator.iteration import IterationPlan, plan_review_delta
 from app.orchestrator.persistence import (
     MemoryOrchestratorStore,
     OrchestratorStore,
     TaskWrite,
     utc_now,
 )
-from app.orchestrator.runners import AgentRunner, InProcessAgentRunner
+from app.orchestrator.runners import (
+    AgentRunner,
+    InProcessAgentRunner,
+    TargetedAgentRunner,
+)
 from app.orchestrator.state import TERMINAL_FAILED, empty_state
 
 logger = structlog.get_logger(__name__)
@@ -108,6 +113,9 @@ async def run_review(
     settings: Settings | None = None,
     embeddings_provider: EmbeddingsProvider | None = None,
     trace: DecisionTrace | None = None,
+    mode: ReviewMode = ReviewMode.OPENED,
+    previous_findings: Sequence[Mapping[str, Any]] | None = None,
+    head_sha: str | None = None,
 ) -> ReviewOutcome:
     """Execute the orchestration graph over ``scope`` and persist its outcome.
 
@@ -118,6 +126,14 @@ async def run_review(
     ``mock`` provider keeps local runs offline and deterministic). ARUM
     decision traces (Phase 8) go to ``trace`` — a file-backed writer in
     production, an in-memory sink by default in tests.
+
+    Iterative reviews (Phase 12, FR-6): with ``mode == SYNCHRONIZE`` and
+    ``previous_findings`` supplied, the diff against the last-reviewed state is
+    classified before agent fan-out — resolved/stale dispositions are persisted,
+    the review enters ``ITERATING``, and only the agents owning the touched
+    regions are run (falling back to the full agent set when the delta has no
+    prior findings to steer it). ``head_sha`` is recorded on the iteration row
+    when known (the delta-fetch seam is a later wiring pass).
     """
     cfg = settings or get_settings()
     ctx = RunContext(
@@ -135,6 +151,37 @@ async def run_review(
         return await _fail_early(ctx, review_id, invalid, started)
 
     await ctx.store.transition(review_id, ReviewStatus.PROCESSING)
+
+    iteration_plan: IterationPlan | None = None
+    if mode is ReviewMode.SYNCHRONIZE and previous_findings is not None:
+        iteration_plan = plan_review_delta(
+            previous_findings,
+            scope.changed_files,
+            line_gap=cfg.iteration_line_gap,
+        )
+        if not iteration_plan.resolutions:
+            iteration_plan = None  # first sync: nothing previous to re-check
+        elif not iteration_plan.changed_paths:
+            return await _no_op_iteration(
+                ctx,
+                review_id,
+                scope,
+                started,
+                head_sha,
+                plan=iteration_plan,
+            )
+        else:
+            await ctx.store.transition(review_id, ReviewStatus.ITERATING)
+            await ctx.store.apply_iteration_delta(review_id, iteration_plan.resolutions)
+            targets = iteration_plan.targeted_agents or tuple(agent_keys())
+            ctx = RunContext(
+                runner=TargetedAgentRunner(ctx.runner, targets),
+                store=ctx.store,
+                settings=ctx.settings,
+                embeddings_provider=ctx.embeddings_provider,
+                trace=ctx.trace,
+                started_at=ctx.started_at,
+            )
     await ctx.store.transition(review_id, ReviewStatus.AGENTS_RUNNING)
 
     agent_ids = await ctx.store.sync_agents(agent_metadata())
@@ -148,7 +195,17 @@ async def run_review(
     )
 
     duration_ms = int((time.monotonic() - started) * 1000)
-    outcome = await _persist(ctx, review_id, scope, agent_ids, final, duration_ms)
+    outcome = await _persist(
+        ctx,
+        review_id,
+        scope,
+        agent_ids,
+        final,
+        duration_ms,
+        mode=mode,
+        iteration_plan=iteration_plan,
+        head_sha=head_sha,
+    )
     logger.info(
         "orchestration_completed",
         review_id=review_id,
@@ -176,6 +233,10 @@ async def _persist(
     agent_ids: dict[str, str],
     final: dict[str, Any],
     duration_ms: int,
+    *,
+    mode: ReviewMode = ReviewMode.OPENED,
+    iteration_plan: IterationPlan | None = None,
+    head_sha: str | None = None,
 ) -> ReviewOutcome:
     scope_data = scope.to_dict()
     now: datetime = utc_now()
@@ -240,6 +301,7 @@ async def _persist(
         )
 
     decision_error: str | None = None
+    selected_count = 0
     terminal = final.get("terminal")
     permanent_failures = bool(final.get("failed"))
     root_cause = final.get("root_cause")
@@ -250,7 +312,7 @@ async def _persist(
         and not permanent_failures
         and terminal != TERMINAL_FAILED
     ):
-        decision_error = await _decide_findings(ctx, review_id, summary)
+        decision_error, selected_count = await _decide_findings(ctx, review_id, summary)
 
     if consolidation_error is not None:
         review_status = ReviewStatus.FAILED
@@ -286,6 +348,25 @@ async def _persist(
         review_status = ReviewStatus.COMPLETED
         await ctx.store.transition(review_id, review_status, completed_at=now)
 
+    if iteration_plan is not None and not permanent_failures:
+        invoked = tuple(final["plan"].get("agent_keys") or [])
+        await ctx.store.record_iteration(
+            review_id,
+            base_sha=scope.base_ref,
+            head_sha=head_sha or scope.head_ref,
+            diff_stats=iteration_plan.diff_stats(),
+            agents_invoked={
+                "targeted": iteration_plan.targeted_agents or [],
+                "planned": list(invoked),
+            },
+            published_count=selected_count,
+            resolved_count=iteration_plan.resolved_count,
+            stale_count=iteration_plan.stale_count,
+        )
+        if review_status not in (ReviewStatus.FAILED, ReviewStatus.COMPLETED):
+            review_status = ReviewStatus.ITERATING
+            await ctx.store.transition(review_id, review_status, completed_at=now)
+
     return ReviewOutcome(
         review_id=review_id,
         status=review_status.value,
@@ -302,22 +383,81 @@ async def _persist(
     )
 
 
+async def _no_op_iteration(
+    ctx: RunContext,
+    review_id: str,
+    scope: AgentScope,
+    started: float,
+    head_sha: str | None,
+    *,
+    plan: IterationPlan,
+) -> ReviewOutcome:
+    """A synchronize with no re-checkable regions: record + complete, no agents.
+
+    Reached when the delta's ``changed_paths`` is empty — every previous finding
+    was either resolved (file removed) or carried forward untouched, so there is
+    nothing for the targeted agents to re-scan. The iteration is recorded with
+    zero agents invoked (FR-6.3 keeps unchanged rounds cost-free) and the review
+    completes without fan-out.
+    """
+    now = utc_now()
+    await ctx.store.record_iteration(
+        review_id,
+        base_sha=scope.base_ref,
+        head_sha=head_sha or scope.head_ref,
+        diff_stats=plan.diff_stats(),
+        agents_invoked={"targeted": list(plan.targeted_agents), "planned": []},
+        published_count=0,
+        resolved_count=plan.resolved_count,
+        stale_count=plan.stale_count,
+    )
+    await ctx.store.transition(review_id, ReviewStatus.COMPLETED, completed_at=now)
+    await ctx.store.append_note(
+        review_id,
+        "supervisor: synchronize had no changed regions — "
+        f"{plan.resolved_count} resolved, {plan.stale_count} stale, "
+        f"{plan.keep_count} carried forward; no agents invoked.",
+    )
+    logger.info(
+        "orchestration_noop_iteration",
+        review_id=review_id,
+        resolved=plan.resolved_count,
+        stale=plan.stale_count,
+        kept=plan.keep_count,
+    )
+    return ReviewOutcome(
+        review_id=review_id,
+        status=ReviewStatus.COMPLETED.value,
+        agent_keys=(),
+        findings=[],
+        tasks=[],
+        notes=[
+            "supervisor: synchronize had no changed regions — "
+            f"{plan.resolved_count} resolved, {plan.stale_count} stale, "
+            f"{plan.keep_count} carried forward; no agents invoked."
+        ],
+        root_cause=None,
+        duration_ms=int((time.monotonic() - started) * 1000),
+    )
+
+
 async def _decide_findings(
     ctx: RunContext,
     review_id: str,
     summary: ConsolidationSummary,
-) -> str | None:
+) -> tuple[str | None, int]:
     """Score consolidated candidates with ARUM, then apply budget + safety gates.
 
-    Returns ``None`` on success or an error string that diagnoses the review
-    ``FAILED`` (consistent with the consolidation policy: nothing is silently
-    dropped from the decision trail). Each candidate is annotated with the
-    budget cap and gate reason it ran under, sorted by ARUM rank, and appended
-    to the reproducibility trace (ARUM.md §10). Selected candidates become
-    ``SCHEDULED``; gated/budget-truncated ones become ``SUPPRESSED`` with their
-    duplicate-group members suppressed alongside the representative. The review
-    stays on ``DECIDING`` — actually posting findings is the publisher step
-    (a later phase), so nothing here pretends publication happened.
+    Returns ``(None, selected_count)`` on success or ``(error, 0)`` that
+    diagnoses the review ``FAILED`` (consistent with the consolidation policy:
+    nothing is silently dropped from the decision trail). Each candidate is
+    annotated with the budget cap and gate reason it ran under, sorted by ARUM
+    rank, and appended to the reproducibility trace (ARUM.md §10). Selected
+    candidates become ``SCHEDULED``; gated/budget-truncated ones become
+    ``SUPPRESSED`` with their duplicate-group members suppressed alongside the
+    representative. The review stays on ``DECIDING`` — actually posting findings
+    is the publisher step (a later phase), so nothing here pretends publication
+    happened.
     """
     try:
         weights = load_weights(version=ctx.settings.arum_weights_version)
@@ -378,9 +518,9 @@ async def _decide_findings(
                 "worker rebuilds from developer feedback."
             )
         await ctx.store.append_note(review_id, note)
-        return None
+        return None, selection.selected_count
     except Exception as exc:  # noqa: BLE001 - any decision failure must surface
-        return f"ARUM decision failed: {exc}"
+        return f"ARUM decision failed: {exc}", 0
 
 
 def _budget_cap(risk_class: RiskClass | None, cfg: Settings) -> int:

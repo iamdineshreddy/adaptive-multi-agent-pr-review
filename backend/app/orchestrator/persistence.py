@@ -15,7 +15,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from typing import Any, Protocol
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy import text as sa_text
 from sqlalchemy import update as sa_update
 
@@ -37,6 +37,7 @@ from app.models import (
     FindingGroup,
     RepositoryMemory,
     Review,
+    ReviewIteration,
     ReviewTask,
 )
 from app.models.enums import (
@@ -47,6 +48,7 @@ from app.models.enums import (
     Severity,
     TaskStatus,
 )
+from app.orchestrator.iteration import DeltaAction, Resolution
 
 
 @dataclass(frozen=True)
@@ -220,6 +222,24 @@ class OrchestratorStore(Protocol):
         self, repository_id: object
     ) -> dict[str, Any] | None: ...
 
+    # --- Phase 12: iterative review engine -----------------------------------
+    async def apply_iteration_delta(
+        self, review_id: object, resolutions: Sequence[Resolution]
+    ) -> None: ...
+
+    async def record_iteration(
+        self,
+        review_id: object,
+        *,
+        base_sha: str,
+        head_sha: str,
+        diff_stats: Mapping[str, Any],
+        agents_invoked: Mapping[str, Any],
+        published_count: int,
+        resolved_count: int,
+        stale_count: int,
+    ) -> None: ...
+
 
 class MemoryOrchestratorStore:
     """In-process, deterministic store for unit tests and local debugging."""
@@ -235,6 +255,7 @@ class MemoryOrchestratorStore:
         self.memory: dict[str, dict[str, Any]] = {}
         self.feedback: list[dict[str, Any]] = []
         self.standards: dict[str, list[dict[str, Any]]] = {}
+        self.iterations: list[dict[str, Any]] = []
 
     async def transition(
         self,
@@ -569,6 +590,63 @@ class MemoryOrchestratorStore:
             return None
         learned = record["learned_weights"]
         return dict(learned) if isinstance(learned, dict) else None
+
+    async def apply_iteration_delta(
+        self, review_id: object, resolutions: Sequence[Resolution]
+    ) -> None:
+        rid = str(review_id)
+        by_id = {row["id"]: row for row in self.findings}
+        for resolution in resolutions:
+            if resolution.action is DeltaAction.KEEP:
+                continue
+            row = by_id.get(resolution.finding_id)
+            if row is None:
+                continue
+            row["publication_status"] = resolution.action.value
+        stale = sum(1 for r in resolutions if r.action is DeltaAction.STALE)
+        resolved = sum(1 for r in resolutions if r.action is DeltaAction.RESOLVED)
+        if resolutions:
+            await self.append_note(
+                rid,
+                f"supervisor: iteration delta {resolved} resolved, "
+                f"{stale} stale, "
+                f"{len(resolutions) - resolved - stale} kept",
+            )
+
+    async def record_iteration(
+        self,
+        review_id: object,
+        *,
+        base_sha: str,
+        head_sha: str,
+        diff_stats: Mapping[str, Any],
+        agents_invoked: Mapping[str, Any],
+        published_count: int,
+        resolved_count: int,
+        stale_count: int,
+    ) -> None:
+        rid = str(review_id)
+        current = max(
+            (
+                int(row["iteration"])
+                for row in self.iterations
+                if row["review_id"] == rid
+            ),
+            default=0,
+        )
+        self.iterations.append(
+            {
+                "review_id": rid,
+                "iteration": current + 1,
+                "base_sha": base_sha,
+                "head_sha": head_sha,
+                "diff_stats": dict(diff_stats),
+                "agents_invoked": dict(agents_invoked),
+                "published_count": published_count,
+                "resolved_count": resolved_count,
+                "stale_count": stale_count,
+            }
+        )
 
 
 class SqlOrchestratorStore:
@@ -1056,6 +1134,72 @@ class SqlOrchestratorStore:
             if row is None or row.learned_weights is None:
                 return None
             return dict(row.learned_weights)
+
+    async def apply_iteration_delta(
+        self, review_id: object, resolutions: Sequence[Resolution]
+    ) -> None:
+        rid = uuid.UUID(str(review_id))
+        stale = 0
+        resolved = 0
+        async with self._session_factory() as session, session.begin():
+            for resolution in resolutions:
+                if resolution.action is DeltaAction.KEEP:
+                    continue
+                if resolution.action is DeltaAction.STALE:
+                    stale += 1
+                else:
+                    resolved += 1
+                await session.execute(
+                    sa_update(Finding)
+                    .where(
+                        Finding.id == uuid.UUID(resolution.finding_id),
+                        Finding.review_id == rid,
+                    )
+                    .values(publication_status=resolution.action.value)
+                )
+        if resolutions:
+            await self.append_note(
+                rid,
+                f"supervisor: iteration delta {resolved} resolved, "
+                f"{stale} stale, "
+                f"{len(resolutions) - resolved - stale} kept",
+            )
+
+    async def record_iteration(
+        self,
+        review_id: object,
+        *,
+        base_sha: str,
+        head_sha: str,
+        diff_stats: Mapping[str, Any],
+        agents_invoked: Mapping[str, Any],
+        published_count: int,
+        resolved_count: int,
+        stale_count: int,
+    ) -> None:
+        rid = uuid.UUID(str(review_id))
+        async with self._session_factory() as session, session.begin():
+            next_round = (
+                await session.scalar(
+                    select(func.max(ReviewIteration.iteration)).where(
+                        ReviewIteration.review_id == rid
+                    )
+                )
+                or 0
+            ) + 1
+            session.add(
+                ReviewIteration(
+                    review_id=rid,
+                    iteration=next_round,
+                    base_sha=base_sha,
+                    head_sha=head_sha,
+                    diff_stats=dict(diff_stats),
+                    agents_invoked=dict(agents_invoked),
+                    published_count=published_count,
+                    resolved_count=resolved_count,
+                    stale_count=stale_count,
+                )
+            )
 
     @staticmethod
     def _int(value: object) -> int:

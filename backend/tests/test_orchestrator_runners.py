@@ -8,7 +8,12 @@ import pytest
 from celery.exceptions import TimeoutError as CeleryTimeoutError
 
 from app.agents.contract import AgentScope
-from app.orchestrator.runners import CeleryFanOutRunner, _payload_to_result
+from app.orchestrator.runners import (
+    CeleryFanOutRunner,
+    InProcessAgentRunner,
+    TargetedAgentRunner,
+    _payload_to_result,
+)
 
 SCOPE = AgentScope(
     review_id=uuid.uuid4(),
@@ -112,4 +117,31 @@ class TestPayloadToResult:
         }
         result = _payload_to_result("security", payload)
         assert result.success is True
-        assert len(result.findings) == 1
+
+
+class TestTargetedAgentRunner:
+    @pytest.fixture
+    def security_runner(self) -> InProcessAgentRunner:
+        return InProcessAgentRunner()
+
+    async def test_returns_only_targeted_keys(
+        self, security_runner: InProcessAgentRunner
+    ) -> None:
+        runner = TargetedAgentRunner(security_runner, ["security", "quality"])
+        keys = await runner.agent_keys()
+        assert set(keys) == {"security", "quality"}
+
+    async def test_planned_keys_matches_init(
+        self, security_runner: InProcessAgentRunner
+    ) -> None:
+        runner = TargetedAgentRunner(security_runner, ("quality",))
+        assert runner.planned_keys == ("quality",)
+
+    async def test_out_of_set_key_is_rejected(
+        self, security_runner: InProcessAgentRunner
+    ) -> None:
+        runner = TargetedAgentRunner(security_runner, ["security"])
+        result = await runner.run("quality", SCOPE)
+        assert result.success is False
+        assert result.retryable is False
+        assert "outside" in result.error

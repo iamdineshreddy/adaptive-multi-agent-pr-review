@@ -13,8 +13,9 @@ import uuid
 import pytest
 
 from app.agents.contract import AgentScope, ChangeKind, FileSlice
+from app.agents.registry import agent_keys as _registered_keys
 from app.config.settings import Settings
-from app.models.enums import ReviewStatus, TaskStatus
+from app.models.enums import ReviewMode, ReviewStatus, TaskStatus
 from app.orchestrator.persistence import MemoryOrchestratorStore
 from app.orchestrator.runners import RunnerResult
 from app.orchestrator.service import run_review
@@ -94,6 +95,148 @@ def valid_scope() -> AgentScope:
 @pytest.fixture
 def settings() -> Settings:
     return Settings(orchestrator_max_agent_retries=2)
+
+
+def _previous_finding(
+    *,
+    finding_id: str | None = None,
+    file_path: str = "app/auth.py",
+    category: str = "security/xss",
+    line_start: int | None = 1,
+    line_end: int | None = 7,
+) -> dict:
+    """A previously-persisted finding row shaped for ``plan_review_delta``."""
+    return {
+        "id": finding_id or str(uuid.uuid4()),
+        "file_path": file_path,
+        "category": category,
+        "line_start": line_start,
+        "line_end": line_end,
+    }
+
+
+async def test_synchronize_targets_only_stale_agents_and_records_iteration(
+    valid_scope: AgentScope, settings: Settings
+) -> None:
+    # A previous security finding sits exactly inside the changed region -> stale.
+    previous = [_previous_finding(line_start=1, line_end=7)]
+    runner = ScriptedRunner(
+        {
+            "security": [_success("security", findings=(_finding(),))],
+            "quality": [
+                _success("quality", findings=(_finding(category="quality/x"),))
+            ],
+        }
+    )
+    store = MemoryOrchestratorStore()
+    outcome = await run_review(
+        valid_scope,
+        runner=runner,
+        store=store,
+        settings=settings,
+        mode=ReviewMode.SYNCHRONIZE,
+        previous_findings=previous,
+        head_sha="abc123def",
+    )
+
+    # Only the targeted agent ran; quality was outside the target set.
+    assert sorted(outcome.agent_keys) == ["security"]
+    assert [t["agent_key"] for t in store.tasks] == ["security"]
+    assert outcome.status == ReviewStatus.ITERATING.value
+
+    record = store.reviews[str(REVIEW_ID)]
+    statuses = [h["status"] for h in record["status_history"]]
+    assert "ITERATING" in statuses
+    assert statuses.index("ITERATING") < statuses.index("AGENTS_RUNNING")
+    assert statuses[-1] == "ITERATING"
+
+    # The iteration row captures the round's disposition + cost envelope.
+    assert len(store.iterations) == 1
+    row = store.iterations[0]
+    assert row["review_id"] == str(REVIEW_ID)
+    assert row["iteration"] == 1
+    assert row["base_sha"] == "main"
+    assert row["head_sha"] == "abc123def"
+    assert row["resolved_count"] == 0
+    assert row["stale_count"] == 1
+    assert row["published_count"] == 1  # the single ARUM-selected candidate
+    assert row["agents_invoked"]["targeted"] == ("security",)
+
+    # The stale disposition was persisted on the previous finding.
+    other = store.findings[0]
+    assert other["publication_status"] == "SCHEDULED"
+    assert any("iteration delta" in note for note in record["supervisor_notes"])
+
+
+async def test_synchronize_all_resolved_records_iteration_and_completes(
+    valid_scope: AgentScope, settings: Settings
+) -> None:
+    # The only previous finding was in a file the new commit removed -> resolved,
+    # and no agent owns the removed region, so the full agent set is the fallback.
+    valid = AgentScope(
+        review_id=REVIEW_ID,
+        repository_id=REPO_ID,
+        pr_number=42,
+        pr_title="Remove dead code",
+        pr_description="",
+        base_ref="main",
+        head_ref="feat/cleanup",
+        changed_files=(
+            FileSlice(
+                file_path="app/dead.py",
+                patch="@@ -1,2 +0,0 @@\n",
+                new_start=None,
+                new_end=None,
+                change_kind=ChangeKind.REMOVED,
+            ),
+        ),
+    )
+    previous = [_previous_finding(file_path="app/dead.py")]
+    runner = ScriptedRunner({k: [_success(k)] for k in _registered_keys()})
+    store = MemoryOrchestratorStore()
+    outcome = await run_review(
+        valid,
+        runner=runner,
+        store=store,
+        settings=settings,
+        mode=ReviewMode.SYNCHRONIZE,
+        previous_findings=previous,
+        head_sha="ffffffff",
+    )
+
+    # Stale category set is empty -> full agent set fallback runs all agents.
+    assert sorted(outcome.agent_keys) == sorted(_registered_keys())
+    assert len(store.iterations) == 1
+    row = store.iterations[0]
+    assert row["resolved_count"] == 1
+    assert row["stale_count"] == 0
+    assert row["head_sha"] == "ffffffff"
+    # No consolidated findings -> completed, not iterating.
+    assert outcome.status == ReviewStatus.COMPLETED.value
+    assert store.reviews[str(REVIEW_ID)]["status"] == "COMPLETED"
+
+
+async def test_synchronize_without_previous_findings_is_a_plain_review(
+    valid_scope: AgentScope, settings: Settings
+) -> None:
+    runner = ScriptedRunner(
+        {"security": [_success("security", findings=(_finding(),))]}
+    )
+    store = MemoryOrchestratorStore()
+    outcome = await run_review(
+        valid_scope,
+        runner=runner,
+        store=store,
+        settings=settings,
+        mode=ReviewMode.SYNCHRONIZE,
+        previous_findings=[],
+    )
+
+    assert outcome.status == ReviewStatus.DECIDING.value
+    assert len(store.iterations) == 0  # first sync: full review, no iteration
+    assert "ITERATING" not in [
+        h["status"] for h in store.reviews[str(REVIEW_ID)]["status_history"]
+    ]
 
 
 async def test_success_with_findings_lands_on_deciding_checkpoint(

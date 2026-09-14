@@ -118,6 +118,9 @@ class Settings(BaseSettings):
     consolidation_similarity_threshold: float = 0.85  # cosine threshold to group
     consolidation_max_line_gap: int = 5  # max gap between two ranges to group
 
+    # --- Iterative review engine (Phase 12, FR-6) ----------------------------
+    iteration_line_gap: int = 0  # tolerance (lines) when classifying stale findings
+
     # --- Observability -------------------------------------------------------
     langfuse_public_key: str = ""
     langfuse_secret_key: str = ""

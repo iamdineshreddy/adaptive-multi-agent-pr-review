@@ -181,8 +181,8 @@ async def test_decision_layer_change_diagnoses_failed(
 
     async def _stuck(  # type: ignore[no-untyped-def]
         ctx, review_id, summary
-    ) -> str:
-        return "ARUM decision failed: decision kernel unavailable"
+    ) -> tuple[str, int]:
+        return "ARUM decision failed: decision kernel unavailable", 0
 
     monkeypatch.setattr(service_module, "_decide_findings", _stuck)
     runner = ScriptedRunner(

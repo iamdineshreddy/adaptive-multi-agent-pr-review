@@ -55,6 +55,41 @@ class AgentRunner(Protocol):
     async def run(self, agent_key: str, scope: AgentScope) -> RunnerResult: ...
 
 
+class TargetedAgentRunner:
+    """Iteration boundary adapter (FR-6.2): restricts the planned agent set.
+
+    Wraps any :class:`AgentRunner` and exposes only ``keys`` via
+    ``agent_keys()``. Running an out-of-set key is a loud contract error, not a
+    silent pass — the graph must never exceed the planned target set.
+    """
+
+    name = "targeted"
+
+    def __init__(self, runner: AgentRunner, keys: Sequence[str]) -> None:
+        self._runner = runner
+        self._keys = tuple(keys)
+
+    @property
+    def planned_keys(self) -> tuple[str, ...]:
+        return self._keys
+
+    async def agent_keys(self) -> Sequence[str]:
+        return self._keys
+
+    async def run(self, agent_key: str, scope: AgentScope) -> RunnerResult:
+        if agent_key not in self._keys:
+            return RunnerResult(
+                agent_key,
+                success=False,
+                retryable=False,
+                error=(
+                    f"agent '{agent_key}' is outside the iteration target set "
+                    f"{', '.join(self._keys) or '(empty)'}"
+                ),
+            )
+        return await self._runner.run(agent_key, scope)
+
+
 class InProcessAgentRunner:
     """Runs agents in-process through ``app.agents.runner.run_agent``.
 

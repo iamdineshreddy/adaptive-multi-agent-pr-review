@@ -16,8 +16,9 @@ from sqlalchemy.ext.asyncio import AsyncEngine
 
 from app.config.settings import get_settings
 from app.database import SessionFactory, create_db_engine
-from app.models import Base
-from app.models.enums import ReviewStatus, TaskStatus
+from app.models import Base, Finding
+from app.models.enums import FindingStatus, ReviewStatus, TaskStatus
+from app.orchestrator.iteration import DeltaAction, Resolution
 from app.orchestrator.persistence import SqlOrchestratorStore, TaskWrite
 
 
@@ -172,5 +173,107 @@ async def test_sql_store_syncs_agents_tasks_and_metrics() -> None:
         assert tasks == [("security_queue", "SUCCESS", 1)]
         assert metrics[0].duration_ms == 15
         assert metrics[0].cost_usd == 0.01
+    finally:
+        await engine.dispose()
+
+
+async def test_sql_store_records_iterations_and_applies_deltas() -> None:
+    await _require_db()
+    engine = create_db_engine()
+    try:
+        await _reset_schema(engine)
+        review_id, repo_id = await _seed_review(engine)
+        store = SqlOrchestratorStore()
+        agent_ids = await store.sync_agents(
+            [{"key": "security", "name": "Security Agent", "version": "1.0"}]
+        )
+
+        finding_id = uuid.uuid4()
+        async with SessionFactory() as session:
+            session.add(
+                Finding(
+                    id=finding_id,
+                    review_id=review_id,
+                    repository_id=repo_id,
+                    agent_id=agent_ids["security"],
+                    file_path="app/auth.py",
+                    line_start=1,
+                    line_end=7,
+                    category="security/xss",
+                    severity="HIGH",
+                    confidence=0.9,
+                    title="XSS risk",
+                    description="Unescaped output.",
+                    evidence={},
+                    publication_status=FindingStatus.CANDIDATE,
+                )
+            )
+            await session.commit()
+
+        await store.apply_iteration_delta(
+            review_id,
+            [
+                Resolution(
+                    finding_id=str(finding_id),
+                    action=DeltaAction.STALE,
+                    file_path="app/auth.py",
+                    category="security/xss",
+                    line_start=1,
+                    line_end=7,
+                    reason="region touched by the new commit; re-evaluate",
+                )
+            ],
+        )
+        await store.record_iteration(
+            review_id,
+            base_sha="main",
+            head_sha="sha2",
+            diff_stats={"changed_paths": ["app/auth.py"], "stale": 1},
+            agents_invoked={"targeted": ["security"], "planned": ["security"]},
+            published_count=0,
+            resolved_count=0,
+            stale_count=1,
+        )
+        await store.record_iteration(
+            review_id,
+            base_sha="main",
+            head_sha="sha3",
+            diff_stats={"changed_paths": [], "stale": 0},
+            agents_invoked={"targeted": [], "planned": []},
+            published_count=0,
+            resolved_count=1,
+            stale_count=0,
+        )
+
+        async with SessionFactory() as session:
+            finding = (
+                await session.execute(
+                    text(
+                        "SELECT publication_status FROM findings "
+                        "WHERE id = :id AND review_id = :rid"
+                    ),
+                    {"id": finding_id, "rid": review_id},
+                )
+            ).scalar()
+            rounds = (
+                await session.execute(
+                    text(
+                        "SELECT iteration, resolved_count, stale_count "
+                        "FROM review_iterations "
+                        "WHERE review_id = :rid ORDER BY iteration"
+                    ),
+                    {"rid": review_id},
+                )
+            ).all()
+            note = (
+                await session.execute(
+                    text("SELECT supervisor_notes FROM reviews WHERE id = :rid"),
+                    {"rid": review_id},
+                )
+            ).scalar()
+
+        assert finding == FindingStatus.STALE.value
+        assert [(r[0], r[1], r[2]) for r in rounds] == [(1, 0, 1), (2, 1, 0)]
+        assert any("iteration delta 0 resolved, 1 stale" in line for line in note)
     finally:
         await engine.dispose()
