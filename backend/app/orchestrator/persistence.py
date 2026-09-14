@@ -344,6 +344,39 @@ class OrchestratorStore(Protocol):
 
     async def status_summary(self) -> dict[str, int]: ...
 
+    async def repository_summaries(
+        self, *, limit: int, offset: int
+    ) -> list[dict[str, Any]]: ...
+
+    async def repository_detail(self, repository_id: object) -> dict[str, Any] | None:
+        """Repository record + configured settings/overrides."""
+
+    async def repository_memory(self, repository_id: object) -> dict[str, Any] | None:
+        """Repository memory snapshot + decay params + learned weights."""
+
+    async def repository_feedback(
+        self,
+        repository_id: object,
+        *,
+        limit: int,
+        offset: int,
+    ) -> list[dict[str, Any]]: ...
+
+    async def findings_for_review(
+        self,
+        review_id: object,
+        *,
+        status: FindingStatus | None,
+        limit: int,
+        offset: int,
+    ) -> list[dict[str, Any]]: ...
+
+    async def iterations_for_review(self, review_id: object) -> list[dict[str, Any]]:
+        """Iteration rows for a review, ascending by round number."""
+
+    async def metrics_rollup(self) -> dict[str, Any]:
+        """Dashboard metrics: queue depths, findings, feedback, agent rollups."""
+
 
 class MemoryOrchestratorStore:
     """In-process, deterministic store for unit tests and local debugging."""
@@ -360,6 +393,7 @@ class MemoryOrchestratorStore:
         self.feedback: list[dict[str, Any]] = []
         self.standards: dict[str, list[dict[str, Any]]] = {}
         self.iterations: list[dict[str, Any]] = []
+        self.repositories: dict[str, dict[str, Any]] = {}
 
     async def transition(
         self,
@@ -790,6 +824,118 @@ class MemoryOrchestratorStore:
                 continue
             summary[status] = summary.get(status, 0) + 1
         return summary
+
+    async def repository_summaries(
+        self, *, limit: int, offset: int
+    ) -> list[dict[str, Any]]:
+        rows = sorted(
+            ({"id": rid, **rec} for rid, rec in self.repositories.items()),
+            key=lambda r: r.get("full_name", ""),
+        )
+        return list(rows[offset : offset + limit])
+
+    async def repository_detail(self, repository_id: object) -> dict[str, Any] | None:
+        rec = self.repositories.get(str(repository_id))
+        if rec is None:
+            return None
+        return {"id": str(repository_id), **dict(rec)}
+
+    async def repository_memory(self, repository_id: object) -> dict[str, Any] | None:
+        return (
+            dict(self.memory[str(repository_id)])
+            if str(repository_id) in self.memory
+            else None
+        )
+
+    async def repository_feedback(
+        self,
+        repository_id: object,
+        *,
+        limit: int,
+        offset: int,
+    ) -> list[dict[str, Any]]:
+        rid = str(repository_id)
+        rows = [
+            {"id": row["id"], **row}
+            for row in self.feedback
+            if row.get("repository_id") == rid
+        ]
+        rows.sort(key=lambda row: str(row.get("created_at") or ""), reverse=True)
+        return list(rows[offset : offset + limit])
+
+    async def findings_for_review(
+        self,
+        review_id: object,
+        *,
+        status: FindingStatus | None,
+        limit: int,
+        offset: int,
+    ) -> list[dict[str, Any]]:
+        rid = str(review_id)
+        rows = [
+            dict(row)
+            for row in self.findings
+            if row.get("review_id") == rid
+            and (status is None or row.get("publication_status") == status.value)
+        ]
+        return list(rows[offset : offset + limit])
+
+    async def iterations_for_review(self, review_id: object) -> list[dict[str, Any]]:
+        rows = [
+            dict(row)
+            for row in self.iterations
+            if row.get("review_id") == str(review_id)
+        ]
+        rows.sort(key=lambda row: row.get("iteration", 0))
+        return rows
+
+    async def metrics_rollup(self) -> dict[str, Any]:
+        status_summary = await self.status_summary()
+        findings_total = len(self.findings)
+        feedback_by_outcome: dict[str, int] = {}
+        for fb in self.feedback:
+            out = str(fb.get("outcome", ""))
+            feedback_by_outcome[out] = feedback_by_outcome.get(out, 0) + 1
+        findings_by_status: dict[str, int] = {}
+        redundancy_count = 0
+        for f in self.findings:
+            ps = str(f.get("publication_status", ""))
+            findings_by_status[ps] = findings_by_status.get(ps, 0) + 1
+            if f.get("duplicate_group"):
+                redundancy_count += 1
+        tokens_in = sum(
+            int(m.get("stats", {}).get("tokens_in", 0)) for m in self.metrics
+        )
+        tokens_out = sum(
+            int(m.get("stats", {}).get("tokens_out", 0)) for m in self.metrics
+        )
+        cost_usd = sum(
+            float(m.get("stats", {}).get("cost_usd") or 0) for m in self.metrics
+        )
+        latencies = [
+            int(m.get("stats", {}).get("duration_ms") or 0)
+            for m in self.metrics
+            if m.get("stats", {}).get("duration_ms")
+        ]
+        return {
+            "reviews_by_status": status_summary,
+            "findings_total": findings_total,
+            "findings_by_status": findings_by_status,
+            "redundancy_rate": redundancy_count / findings_total
+            if findings_total
+            else 0,
+            "feedback_total": len(self.feedback),
+            "feedback_by_outcome": feedback_by_outcome,
+            "agent_metrics": {
+                "tokens_in": tokens_in,
+                "tokens_out": tokens_out,
+                "cost_usd": round(cost_usd, 6),
+                "latency_avg_ms": round(sum(latencies) / len(latencies), 1)
+                if latencies
+                else 0,
+                "latency_max_ms": max(latencies) if latencies else 0,
+            },
+        }
 
 
 class SqlOrchestratorStore:
@@ -1412,6 +1558,203 @@ class SqlOrchestratorStore:
                 select(Review.status, func.count()).group_by(Review.status)
             )
             return {status.value: int(count) for status, count in result}
+
+    # --- Phase 13 part 2: repositories / memory / feedback / metrics ---------
+    async def repository_summaries(
+        self, *, limit: int, offset: int
+    ) -> list[dict[str, Any]]:
+        async with self._session_factory() as session:
+            repos = await session.scalars(
+                select(Repository)
+                .order_by(Repository.full_name)
+                .offset(offset)
+                .limit(limit)
+            )
+            return [
+                {
+                    "id": str(r.id),
+                    "full_name": r.full_name,
+                    "default_branch": r.default_branch,
+                    "main_language": r.main_language,
+                    "is_active": r.is_active,
+                }
+                for r in repos
+            ]
+
+    async def repository_detail(self, repository_id: object) -> dict[str, Any] | None:
+        rid = uuid.UUID(str(repository_id))
+        async with self._session_factory() as session:
+            repo = await session.get(Repository, rid)
+            if repo is None:
+                return None
+            return {
+                "id": str(repo.id),
+                "full_name": repo.full_name,
+                "default_branch": repo.default_branch,
+                "main_language": repo.main_language,
+                "github_id": repo.github_id,
+                "is_active": repo.is_active,
+                "priority_overrides": dict(repo.priority_overrides or {}),
+                "review_settings": dict(repo.review_settings or {}),
+            }
+
+    async def repository_memory(self, repository_id: object) -> dict[str, Any] | None:
+        rid = uuid.UUID(str(repository_id))
+        async with self._session_factory() as session:
+            row = await session.scalar(
+                select(RepositoryMemory).where(RepositoryMemory.repository_id == rid)
+            )
+            if row is None:
+                return None
+            return {
+                "repository_id": str(row.repository_id),
+                "version": row.version,
+                "snapshot": dict(row.snapshot or {}),
+                "decay_params": dict(row.decay_params or {}),
+                "learned_weights": dict(row.learned_weights)
+                if row.learned_weights
+                else None,
+                "updated_at": _to_iso(row.updated_at),
+            }
+
+    async def repository_feedback(
+        self,
+        repository_id: object,
+        *,
+        limit: int,
+        offset: int,
+    ) -> list[dict[str, Any]]:
+        rid = uuid.UUID(str(repository_id))
+        async with self._session_factory() as session:
+            rows = (
+                await session.execute(
+                    select(DeveloperFeedback)
+                    .where(DeveloperFeedback.repository_id == rid)
+                    .order_by(DeveloperFeedback.created_at.desc())
+                    .offset(offset)
+                    .limit(limit)
+                )
+            ).scalars()
+            return [
+                {
+                    "id": str(f.id),
+                    "finding_id": str(f.finding_id) if f.finding_id else None,
+                    "review_id": str(f.review_id),
+                    "outcome": f.outcome.value,
+                    "source": f.source.value,
+                    "author_login": f.author_login,
+                    "commit_sha": f.commit_sha,
+                    "created_at": _to_iso(f.created_at),
+                }
+                for f in rows
+            ]
+
+    async def findings_for_review(
+        self,
+        review_id: object,
+        *,
+        status: FindingStatus | None,
+        limit: int,
+        offset: int,
+    ) -> list[dict[str, Any]]:
+        rid = uuid.UUID(str(review_id))
+        statement = select(Finding).where(Finding.review_id == rid)
+        if status is not None:
+            statement = statement.where(Finding.publication_status == status)
+        statement = (
+            statement.order_by(Finding.severity.desc(), Finding.created_at)
+            .offset(offset)
+            .limit(limit)
+        )
+        async with self._session_factory() as session:
+            rows = (await session.execute(statement)).scalars()
+            return [_finding_dict(f) for f in rows]
+
+    async def iterations_for_review(self, review_id: object) -> list[dict[str, Any]]:
+        rid = uuid.UUID(str(review_id))
+        async with self._session_factory() as session:
+            rows = await session.scalars(
+                select(ReviewIteration)
+                .where(ReviewIteration.review_id == rid)
+                .order_by(ReviewIteration.iteration)
+            )
+            return [_iteration_dict(i) for i in rows]
+
+    async def metrics_rollup(self) -> dict[str, Any]:
+        async with self._session_factory() as session:
+            review_counts = {
+                s.value: int(c)
+                for s, c in (
+                    await session.execute(
+                        select(Review.status, func.count()).group_by(Review.status)
+                    )
+                ).all()
+            }
+            findings_counts: dict[str, int] = {}
+            for fs, c in (
+                await session.execute(
+                    select(Finding.publication_status, func.count()).group_by(
+                        Finding.publication_status
+                    )
+                )
+            ).all():
+                findings_counts[fs.value] = int(c)
+            total_findings = sum(findings_counts.values())
+            redundancy_count = (
+                await session.scalar(
+                    select(func.count())
+                    .select_from(Finding)
+                    .where(Finding.duplicate_group.is_not(None))
+                )
+            ) or 0
+            feedback_counts_dict: dict[str, int] = {}
+            for fo, c in (
+                await session.execute(
+                    select(DeveloperFeedback.outcome, func.count()).group_by(
+                        DeveloperFeedback.outcome
+                    )
+                )
+            ).all():
+                feedback_counts_dict[fo.value] = int(c)
+            total_feedback = sum(feedback_counts_dict.values())
+            tokens_in = (
+                await session.scalar(
+                    select(func.coalesce(func.sum(AgentMetric.tokens_in), 0))
+                )
+            ) or 0
+            tokens_out = (
+                await session.scalar(
+                    select(func.coalesce(func.sum(AgentMetric.tokens_out), 0))
+                )
+            ) or 0
+            cost_usd = (
+                await session.scalar(
+                    select(func.coalesce(func.sum(AgentMetric.cost_usd), 0))
+                )
+            ) or 0
+            avg_latency = await session.scalar(
+                select(func.avg(AgentMetric.duration_ms))
+            )
+            max_latency = await session.scalar(
+                select(func.max(AgentMetric.duration_ms))
+            )
+        return {
+            "reviews_by_status": review_counts,
+            "findings_total": int(total_findings),
+            "findings_by_status": findings_counts,
+            "redundancy_rate": float(int(redundancy_count) / int(total_findings))
+            if total_findings
+            else 0,
+            "feedback_total": int(total_feedback),
+            "feedback_by_outcome": feedback_counts_dict,
+            "agent_metrics": {
+                "tokens_in": int(tokens_in),
+                "tokens_out": int(tokens_out),
+                "cost_usd": round(float(cost_usd), 6),
+                "latency_avg_ms": round(float(avg_latency or 0), 1),
+                "latency_max_ms": int(max_latency or 0),
+            },
+        }
 
     @staticmethod
     def _int(value: object) -> int:

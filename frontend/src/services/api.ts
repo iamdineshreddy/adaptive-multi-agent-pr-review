@@ -1,5 +1,9 @@
 import type {
   DashboardSummary,
+  FeedbackEntry,
+  MetricsRollup,
+  RepositoryMemory,
+  RepositorySummary,
   ReviewSummary,
   ReviewsPage,
   ReviewDetail,
@@ -52,6 +56,26 @@ export async function fetchReviews(
 
 export async function fetchReview(id: string): Promise<ReviewDetail> {
   return getJson<ReviewDetail>(`/reviews/${id}`);
+}
+
+export async function fetchRepositories(): Promise<RepositorySummary[]> {
+  return getJson<RepositorySummary[]>("/repositories");
+}
+
+export async function fetchRepositoryMemory(
+  repositoryId: string,
+): Promise<RepositoryMemory> {
+  return getJson<RepositoryMemory>(`/repositories/${repositoryId}/memory`);
+}
+
+export async function fetchRepositoryFeedback(
+  repositoryId: string,
+): Promise<FeedbackEntry[]> {
+  return getJson<FeedbackEntry[]>(`/repositories/${repositoryId}/feedback`);
+}
+
+export async function fetchMetrics(): Promise<MetricsRollup> {
+  return getJson<MetricsRollup>("/metrics");
 }
 
 export { ApiError };

@@ -11,6 +11,8 @@ PR review backend. Reads only through the Phase 13 dashboard read API
 | `/` | Queue/status summary counts by review status |
 | `/reviews` | Newest-first review list with PR context, status badges |
 | `/reviews/:reviewId` | Review detail: findings (severity, ARUM utility, publication status) + iteration history |
+| `/repositories` | Repository list; each row expands to its adaptive memory snapshot (with learned weights) and recent developer-feedback events |
+| `/metrics` | Metrics rollup: reviews/findings/feedback status counts, redundancy rate, agent token/cost/latency stats |
 
 ## Conventions
 

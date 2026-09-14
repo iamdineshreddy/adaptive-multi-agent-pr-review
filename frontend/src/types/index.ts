@@ -102,6 +102,52 @@ export interface DashboardSummary {
   by_status: Record<string, number>;
 }
 
+export interface RepositorySummary {
+  id: string;
+  full_name: string;
+  default_branch: string | null;
+  main_language: string | null;
+  is_active: boolean;
+}
+
+export interface RepositoryMemory {
+  repository_id: string;
+  version: number;
+  snapshot: Record<string, unknown>;
+  decay_params: Record<string, unknown>;
+  learned_weights: Record<string, unknown> | null;
+  updated_at: string | null;
+}
+
+export interface FeedbackEntry {
+  id: string;
+  finding_id: string | null;
+  review_id: string;
+  outcome: string;
+  source: string;
+  author_login: string | null;
+  commit_sha: string | null;
+  created_at: string | null;
+}
+
+export interface AgentMetrics {
+  tokens_in: number;
+  tokens_out: number;
+  cost_usd: number;
+  latency_avg_ms: number;
+  latency_max_ms: number;
+}
+
+export interface MetricsRollup {
+  reviews_by_status: Record<string, number>;
+  findings_total: number;
+  findings_by_status: Record<string, number>;
+  redundancy_rate: number;
+  feedback_total: number;
+  feedback_by_outcome: Record<string, number>;
+  agent_metrics: AgentMetrics;
+}
+
 export interface ReviewsPage {
   items: ReviewSummary[];
   nextLimit: number;

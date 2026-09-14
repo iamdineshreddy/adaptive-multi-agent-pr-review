@@ -14,7 +14,7 @@ from typing import Annotated, Any
 import structlog
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 
-from app.models.enums import ReviewStatus
+from app.models.enums import FindingStatus, ReviewStatus
 from app.orchestrator.persistence import (
     OrchestratorStore,
     SqlOrchestratorStore,
@@ -89,3 +89,106 @@ async def dashboard_summary(
         "total": sum(statuses.values()),
         "by_status": statuses,
     }
+
+
+# --- Phase 13 part 2: repositories / memory / feedback / metrics / findings --
+
+
+@router.get(
+    "/repositories",
+    response_model=list[dict[str, Any]],
+    summary="List repositories",
+)
+async def list_repositories(
+    store: Annotated[OrchestratorStore, Depends(get_dashboard_store)],
+    limit: Annotated[int, Query(ge=1, le=100)] = 50,
+    offset: Annotated[int, Query(ge=0)] = 0,
+) -> list[dict[str, Any]]:
+    return await store.repository_summaries(limit=limit, offset=offset)
+
+
+@router.get(
+    "/repositories/{repository_id}",
+    response_model=dict[str, Any],
+    summary="Repository detail with settings",
+)
+async def get_repository(
+    repository_id: uuid.UUID,
+    store: Annotated[OrchestratorStore, Depends(get_dashboard_store)],
+) -> dict[str, Any]:
+    detail = await store.repository_detail(repository_id)
+    if detail is None:
+        raise _not_found(f"repository '{repository_id}' not found")
+    return detail
+
+
+@router.get(
+    "/repositories/{repository_id}/memory",
+    response_model=dict[str, Any],
+    summary="Repository memory snapshot + learned weights",
+)
+async def get_repository_memory(
+    repository_id: uuid.UUID,
+    store: Annotated[OrchestratorStore, Depends(get_dashboard_store)],
+) -> dict[str, Any]:
+    detail = await store.repository_memory(repository_id)
+    if detail is None:
+        raise _not_found(f"memory for repository '{repository_id}' not found")
+    return detail
+
+
+@router.get(
+    "/repositories/{repository_id}/feedback",
+    response_model=list[dict[str, Any]],
+    summary="Feedback events for a repository",
+)
+async def get_repository_feedback(
+    repository_id: uuid.UUID,
+    store: Annotated[OrchestratorStore, Depends(get_dashboard_store)],
+    limit: Annotated[int, Query(ge=1, le=100)] = 50,
+    offset: Annotated[int, Query(ge=0)] = 0,
+) -> list[dict[str, Any]]:
+    return await store.repository_feedback(repository_id, limit=limit, offset=offset)
+
+
+@router.get(
+    "/reviews/{review_id}/findings",
+    response_model=list[dict[str, Any]],
+    summary="Paginated findings for a review",
+)
+async def list_review_findings(
+    review_id: uuid.UUID,
+    store: Annotated[OrchestratorStore, Depends(get_dashboard_store)],
+    status_filter: Annotated[
+        FindingStatus | None,
+        Query(alias="status", description="Filter by publication_status"),
+    ] = None,
+    limit: Annotated[int, Query(ge=1, le=100)] = 50,
+    offset: Annotated[int, Query(ge=0)] = 0,
+) -> list[dict[str, Any]]:
+    return await store.findings_for_review(
+        review_id, status=status_filter, limit=limit, offset=offset
+    )
+
+
+@router.get(
+    "/reviews/{review_id}/iterations",
+    response_model=list[dict[str, Any]],
+    summary="Iteration summary for a review",
+)
+async def list_review_iterations(
+    review_id: uuid.UUID,
+    store: Annotated[OrchestratorStore, Depends(get_dashboard_store)],
+) -> list[dict[str, Any]]:
+    return await store.iterations_for_review(review_id)
+
+
+@router.get(
+    "/metrics",
+    response_model=dict[str, Any],
+    summary="Dashboard metrics rollup",
+)
+async def metrics(
+    store: Annotated[OrchestratorStore, Depends(get_dashboard_store)],
+) -> dict[str, Any]:
+    return await store.metrics_rollup()
