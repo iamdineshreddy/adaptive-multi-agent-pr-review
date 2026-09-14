@@ -3,8 +3,9 @@
 
 SHELL := /bin/sh
 BACKEND := backend
+FRONTEND := frontend
 
-.PHONY: install test lint typecheck run-uvicorn clean
+.PHONY: install test lint typecheck run-uvicorn clean frontend-install frontend-dev frontend-build
 
 install: ## Create venv + install base and dev deps
 	python -m venv .venv
@@ -23,6 +24,15 @@ typecheck: ## mypy strict
 
 run-uvicorn: ## Dev server
 	cd $(BACKEND) && ../.venv/bin/python -m uvicorn app.main:app --reload --port 8000
+
+frontend-install: ## Install frontend deps
+	cd $(FRONTEND) && npm install
+
+frontend-dev: ## Run frontend dev server (proxies /api -> :8000)
+	cd $(FRONTEND) && npm run dev
+
+frontend-build: ## Type-check + production frontend build
+	cd $(FRONTEND) && npm run build
 
 clean: ## Remove caches
 	find . -type d -name __pycache__ -prune -exec rm -rf {} +

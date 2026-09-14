@@ -35,6 +35,8 @@ from app.models import (
     Embedding,
     Finding,
     FindingGroup,
+    PullRequest,
+    Repository,
     RepositoryMemory,
     Review,
     ReviewIteration,
@@ -69,6 +71,94 @@ class TaskWrite:
 
 def utc_now() -> datetime:
     return datetime.now(UTC)
+
+
+def _review_summary_dict(
+    review: Review,
+    pr: PullRequest,
+    *,
+    full_name: str,
+) -> dict[str, Any]:
+    """JSON-safe dashboard projection of a review + its pull request."""
+    return {
+        "id": str(review.id),
+        "status": review.status.value,
+        "mode": review.mode.value,
+        "priority_score": _to_float(review.priority_score),
+        "risk_class": review.risk_class.value if review.risk_class else None,
+        "budget_cap": review.budget_cap,
+        "arum_version": review.arum_version,
+        "supervisor_notes": list(review.supervisor_notes or []),
+        "failure_reason": review.failure_reason,
+        "root_cause": review.root_cause,
+        "created_at": _to_iso(review.created_at),
+        "updated_at": _to_iso(review.updated_at),
+        "started_at": _to_iso(review.started_at),
+        "completed_at": _to_iso(review.completed_at),
+        "pull_request": {
+            "number": pr.number,
+            "title": pr.title,
+            "author_login": pr.author_login,
+            "base_ref": pr.base_ref,
+            "head_ref": pr.head_ref,
+            "head_sha": pr.head_sha,
+            "last_reviewed_sha": pr.last_reviewed_sha,
+            "state": pr.state.value,
+            "repository": full_name,
+            "changed_files": pr.changed_files,
+            "additions": pr.additions,
+            "deletions": pr.deletions,
+        },
+    }
+
+
+def _finding_dict(finding: Finding) -> dict[str, Any]:
+    return {
+        "id": str(finding.id),
+        "file_path": finding.file_path,
+        "line_start": finding.line_start,
+        "line_end": finding.line_end,
+        "category": finding.category,
+        "severity": finding.severity.value,
+        "confidence": _to_float(finding.confidence),
+        "title": finding.title,
+        "description": finding.description,
+        "suggested_fix": finding.suggested_fix,
+        "publication_status": finding.publication_status.value,
+        "arum_utility": _to_float(finding.arum_utility),
+        "arum_version": finding.arum_version,
+        "feedback_labelled": finding.feedback_labelled,
+        "created_at": _to_iso(finding.created_at),
+    }
+
+
+def _iteration_dict(iteration: ReviewIteration) -> dict[str, Any]:
+    return {
+        "iteration": iteration.iteration,
+        "base_sha": iteration.base_sha,
+        "head_sha": iteration.head_sha,
+        "diff_stats": dict(iteration.diff_stats or {}),
+        "agents_invoked": dict(iteration.agents_invoked or {}),
+        "published_count": iteration.published_count,
+        "resolved_count": iteration.resolved_count,
+        "stale_count": iteration.stale_count,
+        "created_at": _to_iso(iteration.created_at),
+    }
+
+
+def _to_float(value: object) -> float | None:
+    if value is None or isinstance(value, bool):
+        return None
+    if isinstance(value, (int, float, str)):
+        try:
+            return float(value)
+        except (TypeError, ValueError):
+            return None
+    return None
+
+
+def _to_iso(value: datetime | None) -> str | None:
+    return value.isoformat() if value is not None else None
 
 
 def _embedding_row(
@@ -239,6 +329,20 @@ class OrchestratorStore(Protocol):
         resolved_count: int,
         stale_count: int,
     ) -> None: ...
+
+    # --- Phase 13: dashboard read models -------------------------------------
+    async def review_summaries(
+        self,
+        *,
+        limit: int,
+        offset: int,
+        status: ReviewStatus | None = None,
+    ) -> list[dict[str, Any]]: ...
+
+    async def review_detail(self, review_id: object) -> dict[str, Any] | None:
+        """Review with pull-request, findings, and iteration rows attached."""
+
+    async def status_summary(self) -> dict[str, int]: ...
 
 
 class MemoryOrchestratorStore:
@@ -647,6 +751,45 @@ class MemoryOrchestratorStore:
                 "stale_count": stale_count,
             }
         )
+
+    # --- Phase 13: dashboard read models -------------------------------------
+    async def review_summaries(
+        self,
+        *,
+        limit: int,
+        offset: int,
+        status: ReviewStatus | None = None,
+    ) -> list[dict[str, Any]]:
+        rows = [
+            {**record, "id": key}
+            for key, record in self.reviews.items()
+            if status is None or record.get("status") == status.value
+        ]
+        rows.sort(key=lambda row: str(row.get("created_at") or ""), reverse=True)
+        return [dict(row) for row in rows[offset : offset + limit]]
+
+    async def review_detail(self, review_id: object) -> dict[str, Any] | None:
+        record = self.reviews.get(str(review_id))
+        if record is None:
+            return None
+        detail = dict(record)
+        detail["id"] = str(review_id)
+        detail["findings"] = [
+            dict(row) for row in self.findings if row["review_id"] == str(review_id)
+        ]
+        detail["iterations"] = [
+            dict(row) for row in self.iterations if row["review_id"] == str(review_id)
+        ]
+        return detail
+
+    async def status_summary(self) -> dict[str, int]:
+        summary: dict[str, int] = {}
+        for record in self.reviews.values():
+            status = record.get("status")
+            if status is None:
+                continue
+            summary[status] = summary.get(status, 0) + 1
+        return summary
 
 
 class SqlOrchestratorStore:
@@ -1200,6 +1343,75 @@ class SqlOrchestratorStore:
                     stale_count=stale_count,
                 )
             )
+
+    # --- Phase 13: dashboard read models -------------------------------------
+    async def review_summaries(
+        self,
+        *,
+        limit: int,
+        offset: int,
+        status: ReviewStatus | None = None,
+    ) -> list[dict[str, Any]]:
+        statement = (
+            select(Review, PullRequest, Repository.full_name)
+            .join(PullRequest, Review.pull_request_id == PullRequest.id)
+            .join(Repository, Review.repository_id == Repository.id)
+            .order_by(Review.created_at.desc())
+            .offset(offset)
+            .limit(limit)
+        )
+        if status is not None:
+            statement = statement.where(Review.status == status)
+        rows: list[dict[str, Any]] = []
+        async with self._session_factory() as session:
+            result = await session.execute(statement)
+            for review, pr, full_name in result:
+                rows.append(
+                    _review_summary_dict(review, pr, full_name=str(full_name or ""))
+                )
+        return rows
+
+    async def review_detail(self, review_id: object) -> dict[str, Any] | None:
+        rid = uuid.UUID(str(review_id))
+        async with self._session_factory() as session:
+            statement = (
+                select(Review, PullRequest, Repository.full_name)
+                .join(PullRequest, Review.pull_request_id == PullRequest.id)
+                .join(Repository, Review.repository_id == Repository.id)
+                .where(Review.id == rid)
+            )
+            result = await session.execute(statement)
+            row = result.first()
+            if row is None:
+                return None
+            review, pr, full_name = row
+            findings = [
+                _finding_dict(f)
+                for f in await session.scalars(
+                    select(Finding)
+                    .where(Finding.review_id == rid)
+                    .order_by(Finding.severity.desc(), Finding.created_at)
+                )
+            ]
+            iterations = [
+                _iteration_dict(i)
+                for i in await session.scalars(
+                    select(ReviewIteration)
+                    .where(ReviewIteration.review_id == rid)
+                    .order_by(ReviewIteration.iteration)
+                )
+            ]
+            detail = _review_summary_dict(review, pr, full_name=str(full_name or ""))
+            detail["findings"] = findings
+            detail["iterations"] = iterations
+            return detail
+
+    async def status_summary(self) -> dict[str, int]:
+        async with self._session_factory() as session:
+            result = await session.execute(
+                select(Review.status, func.count()).group_by(Review.status)
+            )
+            return {status.value: int(count) for status, count in result}
 
     @staticmethod
     def _int(value: object) -> int:
