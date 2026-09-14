@@ -10,9 +10,11 @@ from fastapi import APIRouter
 
 from app.api.dashboard import router as dashboard_router
 from app.api.feedback import router as feedback_router
+from app.api.monitoring import router as monitoring_router
 from app.webhooks.router import router as webhook_router
 
 api_router = APIRouter()
 api_router.include_router(webhook_router)
 api_router.include_router(feedback_router)
 api_router.include_router(dashboard_router)
+api_router.include_router(monitoring_router)

@@ -1,0 +1,17 @@
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+
+scrape_configs:
+  - job_name: adaptive-review-api
+    metrics_path: /api/v1/monitoring/prometheus
+    static_configs:
+      - targets: ["api:8000"]
+        labels:
+          service: adaptive-review-api
+  - job_name: adaptive-review-worker
+    metrics_path: /api/v1/monitoring/prometheus
+    static_configs:
+      - targets: ["worker:8001"]
+        labels:
+          service: adaptive-review-worker

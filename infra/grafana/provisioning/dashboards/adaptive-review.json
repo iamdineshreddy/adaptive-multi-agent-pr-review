@@ -1,0 +1,54 @@
+{
+  "uid": "adaptive-review-overview",
+  "title": "Adaptive Review — Overview",
+  "version": 1,
+  "schemaVersion": 39,
+  "timezone": "browser",
+  "refresh": "30s",
+  "tags": ["adaptive-review"],
+  "editable": false,
+  "panels": [
+    {
+      "type": "timeseries",
+      "title": "Webhook deliveries",
+      "datasource": { "type": "prometheus", "uid": "Prometheus" },
+      "gridPos": { "h": 7, "w": 8, "x": 0, "y": 0 },
+      "targets": [
+        {
+          "expr": "sum by (outcome) (rate(adaptive_review_webhook_events_total[5m]))",
+          "legendFormat": "{{outcome}}"
+        }
+      ]
+    },
+    {
+      "type": "stat",
+      "title": "Agent LLM tokens",
+      "datasource": { "type": "prometheus", "uid": "Prometheus" },
+      "gridPos": { "h": 7, "w": 4, "x": 8, "y": 0 },
+      "targets": [
+        { "expr": "adaptive_review_agent_tokens_total", "legendFormat": "tokens" }
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "Reviews by status",
+      "datasource": { "type": "prometheus", "uid": "Prometheus" },
+      "gridPos": { "h": 7, "w": 8, "x": 12, "y": 0 },
+      "targets": [
+        {
+          "expr": "adaptive_review_reviews_by_status",
+          "legendFormat": "{{status}}"
+        }
+      ]
+    },
+    {
+      "type": "stat",
+      "title": "Estimated LLM cost (USD)",
+      "datasource": { "type": "prometheus", "uid": "Prometheus" },
+      "gridPos": { "h": 7, "w": 4, "x": 20, "y": 0 },
+      "targets": [
+        { "expr": "adaptive_review_agent_cost_usd_total", "legendFormat": "USD" }
+      ]
+    }
+  ]
+}

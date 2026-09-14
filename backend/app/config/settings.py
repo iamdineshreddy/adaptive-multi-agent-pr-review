@@ -25,6 +25,7 @@ class Settings(BaseSettings):
     # --- Environment -------------------------------------------------------
     env: str = "development"
     debug: bool = True
+    log_level: str = "info"  # structlog filter level
 
     # --- Security ----------------------------------------------------------
     secret_key: str = ""

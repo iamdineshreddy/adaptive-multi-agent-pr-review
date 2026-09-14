@@ -15,6 +15,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 from pydantic import BaseModel, ConfigDict, ValidationError
 
 from app.config.settings import get_settings
+from app.monitoring import prometheus as metrics
 from app.queue.dispatch import CeleryDispatcher
 from app.webhooks.dispatch import LoggingDispatcher, ReviewDispatcher
 from app.webhooks.ingest import ReviewIngester, SqlReviewIngester
@@ -234,6 +235,9 @@ async def _handle_pull_request_event(
 
     outcome = await ingester.ingest(event, delivery_id)
     await dispatcher.dispatch(outcome.review_id, delivery_id)
+    metrics.record_webhook_event(
+        event="pull_request", action=event.action, outcome="accepted"
+    )
     logger.info(
         "webhook_accepted",
         review_id=str(outcome.review_id),

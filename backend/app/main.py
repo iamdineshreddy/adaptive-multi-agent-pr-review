@@ -15,6 +15,9 @@ from app.config.settings import settings
 
 def create_app() -> FastAPI:
     """Build and configure the application."""
+    from app.monitoring.logsetup import configure_logging
+
+    configure_logging()
 
     application = FastAPI(
         title="Adaptive Multi-Agent AI PR Review API",

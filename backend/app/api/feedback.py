@@ -25,6 +25,7 @@ from app.adaptive.feedback import (
 )
 from app.config.settings import get_settings
 from app.models.enums import FeedbackOutcome, FeedbackSource
+from app.monitoring import prometheus as metrics
 from app.orchestrator.persistence import OrchestratorStore, SqlOrchestratorStore
 from app.webhooks.ratelimit import MemoryRateLimiter
 
@@ -133,6 +134,7 @@ async def record_feedback(
 
     feedback_id = await store.create_feedback(write)
     memory_version = await _refresh_repository_memory(store, repository_id)
+    metrics.record_feedback(payload.outcome.value)
     logger.info(
         "feedback_recorded",
         feedback_id=feedback_id,
