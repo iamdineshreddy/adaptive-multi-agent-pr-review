@@ -19,7 +19,7 @@ import hashlib
 import hmac
 import secrets
 from dataclasses import dataclass
-from typing import Any, Protocol
+from typing import Protocol
 
 ROLE_ORDER: tuple[str, ...] = ("viewer", "operator", "admin")
 ROLE_RANK: dict[str, int] = {role: i for i, role in enumerate(ROLE_ORDER)}
@@ -92,21 +92,3 @@ def issue_token(
         repos=frozenset(repos) if repos is not None else None,
     )
     return principal, raw
-
-
-def token_record_as_settings(
-    principal: TokenPrincipal,
-    *,
-    role_entries: list[str],
-    scope_entries: list[str],
-) -> dict[str, Any]:
-    """Serialize a principal into the operator settings payload."""
-    return {
-        "ADAPTIVE_API_TOKEN_HASHES": role_entries + [principal.token_hash],
-        "ADAPTIVE_API_TOKEN_ROLES": {
-            principal.token_hash: principal.role,
-        },
-        "ADAPTIVE_API_TOKEN_SCOPES": {
-            principal.token_hash: sorted(principal.repos) if principal.repos else [],
-        },
-    }

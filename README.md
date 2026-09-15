@@ -155,8 +155,6 @@ backend/
         database/       Async engine, session factory
         config/         pydantic-settings configuration
         monitoring/     Prometheus, Langfuse, structured logging
-        (legacy shells: orchestration/, rag/, services/, schemas/ hold only
-         package markers — implementations live in the modules above)
     tests/              490 tests (unit + gated live-service lanes)
     alembic/            Schema migrations
 frontend/               React + TypeScript + Tailwind dashboard (Vite)
