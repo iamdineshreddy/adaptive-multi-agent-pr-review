@@ -22,7 +22,7 @@ pass.
 | 13 | Frontend dashboard (React + TS + Tailwind): queues, reviews, findings, feedback, memory, metrics | **done** (dashboard read API + React dashboard, see split note below) |
 | 14 | Observability: Langfuse traces, Prometheus metrics, Grafana dashboards, structured logs | **done** (structured logs + Prometheus metrics + Grafana provisioning + Langfuse tracing; see split note below) |
 | 15 | Security hardening: auth, authz, rate limiting, injection defences, secret handling, audit | **part 2 done** (feedback bearer-token + list scoping + body cap, see split note below) |
-| 16 | Testing: unit, integration, API, queue, agent, DB, RAG, adaptive, webhook; failure scenarios | todo |
+| 16 | Testing: unit, integration, API, queue, agent, DB, RAG, adaptive, webhook; failure scenarios | **part 1 done** (see split note below) |
 | 17 | Experiments: dataset (`github-codereview`) preprocessing, baselines, ablation, results, plots | todo |
 | 18 | Deployment: docker-compose (api/worker/scheduler/redis/postgres/frontend/prometheus/grafana) | todo |
 | 19 | Research documentation: ARCHITECTURE.md refinement, RESEARCH.md, EXPERIMENTS.md, final README | todo |
@@ -110,6 +110,24 @@ the public write endpoints via `app/middleware/body_limit.py`; docs in
 + their audit trail, which FR-7.3 must exercise against the not-yet-existing
 rerun/repository-settings routes — the audit records land with those routes
 rather than being fabricated against an endpoint surface that does not exist.
+
+Phase 16 scope note (deliberate split): the suite is organized and hardened in
+documented passes. **Part 1** (this pass): the QA gates that phases 0–15 already
+employed are now codified — `docs/TESTING.md` (suite lanes, gate commands,
+live-service self-skip mechanism, failure-scenario coverage map) plus the
+coverage baseline (84% line over `backend/app`); new coverage fills the
+previously untested seams: the Celery task wrappers (`tests/test_queue_tasks.py`
+— bounded retry countdown, dead-letter + `MaxRetriesExceededError` on
+exhaustion, `pop_and_stage_task` pop→dispatch hand-off), the real
+`LoggingDispatcher` provider + `get_dispatcher` settings-based selection and its
+API-level wiring (`tests/test_webhooks.py`), and a live-service end-to-end
+pipeline test (`tests/test_integration_pipeline.py` — webhook ingest → priority
+zset via the DB score loader → `pop_and_dispatch`, the Phase 4 "broker
+delivery" seam; PostgreSQL+Redis-gated and self-skipping like its siblings).
+446 tests pass (11 live-service self-skip). **Part 2** (next): a
+pipeline-triggered worker crash / restarted-in-flight scenario exercising the
+queue state machine under a real broker, and, with Phase 18 Compose, the
+broker-transport integration run.
 
 ## Cross-cutting requirements (apply every phase)
 

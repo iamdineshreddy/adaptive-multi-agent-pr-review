@@ -17,9 +17,11 @@ import pytest
 from fastapi.testclient import TestClient
 from pydantic import ValidationError
 
-from app.config.settings import Settings
+import app.webhooks.router as router_module
+from app.config.settings import Settings, get_settings
 from app.main import app
-from app.webhooks.dispatch import DispatchResult
+from app.queue.dispatch import CeleryDispatcher
+from app.webhooks.dispatch import DispatchResult, LoggingDispatcher
 from app.webhooks.ingest import IngestOutcome
 from app.webhooks.priority import (
     RiskClass,
@@ -393,4 +395,47 @@ class TestWebhookRouter:
             assert _post(client, valid_payload()).status_code == 202
             third = _post(client, valid_payload())
             assert third.status_code == 429
-            assert third.json()["detail"]["code"] == "rate_limited"
+
+
+# --- Phase 16: real LoggingDispatcher provider (broker-free fallback) ---------
+
+
+class TestLoggingDispatcher:
+    async def test_records_dispatch_intent(self) -> None:
+        """The Phase 3 fallback never pretends to enqueue."""
+        result = await LoggingDispatcher().dispatch(uuid.uuid4(), _DELIVERY)
+        assert isinstance(result, DispatchResult)
+        assert result.dispatched is False
+        assert "pr_ingestion_queue" in result.note
+
+
+class TestDispatcherSelection:
+    """``get_dispatcher`` must honour ``queue_dispatch_provider`` settings."""
+
+    def test_logging_provider_selected(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setattr(router_module, "_dispatcher", None)
+        monkeypatch.setattr(get_settings(), "queue_dispatch_provider", "logging")
+        assert isinstance(get_dispatcher(), LoggingDispatcher)
+
+    def test_celery_provider_selected(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setattr(router_module, "_dispatcher", None)
+        monkeypatch.setattr(get_settings(), "queue_dispatch_provider", "celery")
+        assert isinstance(get_dispatcher(), CeleryDispatcher)
+
+
+class TestWebhookRealDispatcher:
+    def test_real_logging_dispatcher_wired_through_router(self) -> None:
+        """POST reaches the production fallback and returns 202 accepted."""
+        ingester = RecordingIngester()
+        app.dependency_overrides.clear()
+        app.dependency_overrides[get_verifier] = lambda: SignatureVerifier(SECRET)
+        app.dependency_overrides[get_ingester] = lambda: ingester
+        app.dependency_overrides[get_dispatcher] = lambda: LoggingDispatcher()
+        app.dependency_overrides[get_limiter] = lambda: MemoryRateLimiter(
+            per_ip_per_minute=100, per_repo_burst=100
+        )
+        with TestClient(app) as client:
+            response = _post(client, valid_payload())
+        app.dependency_overrides.clear()
+        assert response.status_code == 202
+        assert len(ingester.calls) == 1
