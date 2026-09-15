@@ -30,6 +30,9 @@ def create_app() -> FastAPI:
         redoc_url="/api/redoc" if settings.debug else None,
         openapi_url="/api/openapi.json",
     )
+    from app.middleware.body_limit import RequestBodyLimitMiddleware
+
+    application.add_middleware(RequestBodyLimitMiddleware)
     application.include_router(api_router, prefix="/api/v1")
     return application
 

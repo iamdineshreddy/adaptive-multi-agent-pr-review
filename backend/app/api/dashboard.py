@@ -103,10 +103,14 @@ async def dashboard_summary(
 )
 async def list_repositories(
     store: Annotated[OrchestratorStore, Depends(get_dashboard_store)],
+    principal: Annotated[TokenPrincipal, Depends(get_principal)],
     limit: Annotated[int, Query(ge=1, le=100)] = 50,
     offset: Annotated[int, Query(ge=0)] = 0,
 ) -> list[dict[str, Any]]:
-    return await store.repository_summaries(limit=limit, offset=offset)
+    summaries = await store.repository_summaries(limit=limit + offset, offset=0)
+    if principal.repos is not None:
+        summaries = [s for s in summaries if s["id"] in principal.repos]
+    return summaries[offset : offset + limit]
 
 
 @router.get(

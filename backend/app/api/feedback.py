@@ -27,11 +27,15 @@ from app.config.settings import get_settings
 from app.models.enums import FeedbackOutcome, FeedbackSource
 from app.monitoring import prometheus as metrics
 from app.orchestrator.persistence import OrchestratorStore, SqlOrchestratorStore
+from app.security.auth import get_principal, require_repo_access
+from app.security.tokens import TokenPrincipal
 from app.webhooks.ratelimit import MemoryRateLimiter
 
 logger = structlog.get_logger(__name__)
 
-router = APIRouter(prefix="/feedback", tags=["feedback"])
+router = APIRouter(
+    prefix="/feedback", tags=["feedback"], dependencies=[Depends(get_principal)]
+)
 
 
 class FeedbackRequest(BaseModel):
@@ -96,6 +100,7 @@ async def record_feedback(
     payload: FeedbackRequest,
     limiter: Annotated[MemoryRateLimiter, Depends(get_feedback_limiter)],
     store: Annotated[OrchestratorStore, Depends(get_feedback_store)],
+    principal: Annotated[TokenPrincipal, Depends(get_principal)],
 ) -> FeedbackAccepted:
     """Validate, persist idempotently, and refresh the repository memory snapshot."""
     client_ip = request.client.host if request.client else "test"
@@ -112,6 +117,7 @@ async def record_feedback(
             "finding does not belong to the given review",
         )
     repository_id, category = target
+    require_repo_access(repository_id, principal)
 
     write = FeedbackWrite(
         review_id=str(payload.review_id),

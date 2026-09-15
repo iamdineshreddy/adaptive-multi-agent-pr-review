@@ -33,6 +33,7 @@ class Settings(BaseSettings):
     api_token_hashes: list[str] = []  # SHA-256 digests of bearer API tokens
     api_token_roles: dict[str, str] = {}  # digest -> role (viewer|operator|admin)
     api_token_scopes: dict[str, list[str]] = {}  # digest -> allowed repository ids
+    max_request_body_bytes: int = 1_048_576  # 413 when Content-Length exceeds
 
     # --- GitHub ------------------------------------------------------------
     github_app_id: str = ""

@@ -223,3 +223,33 @@ def test_unscoped_token_reads_all_repositories(
             f"/api/v1/repositories/{repo_id}", headers={"Authorization": header}
         )
         assert response.status_code == 200
+
+
+def test_scoped_token_filters_repository_list(
+    auth_client: tuple[TestClient, str, MemoryOrchestratorStore],
+) -> None:
+    client, _, _ = auth_client
+    scoped_header = _install_scoped_token("viewer", [str(REPO_ID)])
+    response = client.get(
+        "/api/v1/repositories", headers={"Authorization": scoped_header}
+    )
+    assert response.status_code == 200
+    ids = [row["id"] for row in response.json()]
+    assert ids == [str(REPO_ID)]
+    assert str(OTHER_REPO_ID) not in ids
+
+
+# --- request body cap ---------------------------------------------------------
+
+
+def test_oversized_request_body_rejected_413() -> None:
+    with TestClient(app) as client:
+        response = client.post("/api/v1/feedback", content=b"x" * (2**20 + 1))
+    assert response.status_code == 413
+    assert response.json()["detail"]["code"] == "body_too_large"
+
+
+def test_undersized_request_body_passes_middleware() -> None:
+    with TestClient(app) as client:
+        response = client.post("/api/v1/feedback", json={"small": "body"})
+    assert response.status_code == 401  # gate, not the body limit

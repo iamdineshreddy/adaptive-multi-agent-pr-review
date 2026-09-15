@@ -77,3 +77,20 @@ doc pins the requirements now.
   principal's repo scope (dedicated isolation tests).
 - Left for part 2 in this phase: feedback-endpoint bearer token, admin write
   actions + their audit trail, and request body/size caps.
+
+## 11. Implementation appendix (Phase 15, part 2 — feedback auth, list scoping, body cap)
+
+- `POST /api/v1/feedback` now sits behind the same bearer-token gate as the
+  dashboard; the repository is still resolved server-side from the finding, and
+  scoped tokens are limited to feedback on repositories inside their scope
+  (`repository_out_of_scope` 403). Per-IP rate limiting is unchanged.
+- `GET /api/v1/repositories` (list) now honours the caller's scope: scoped
+  principals only see their own repositories; detail/memory/feedback endpoints
+  return 403 out of scope (as in part 1). Admin write actions and the audit
+  trail for them ship with the FR-7.3 rerun/repository-settings routes (see
+  docs/ROADMAP.md Phase 15 split note) rather than being fabricated against an
+  endpoint surface that does not yet exist.
+- Request body-size cap: `ADAPTIVE_MAX_REQUEST_BODY_BYTES` (default 1 MiB) is
+  enforced by `app/middleware/body_limit.py` before routing (413
+  `body_too_large`), guarding the public write endpoints (webhook + feedback)
+  against oversized permutation payloads.

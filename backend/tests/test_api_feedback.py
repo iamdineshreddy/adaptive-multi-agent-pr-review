@@ -17,11 +17,15 @@ from fastapi.testclient import TestClient
 from app.api.feedback import get_feedback_limiter, get_feedback_store
 from app.main import app
 from app.orchestrator.persistence import MemoryOrchestratorStore
+from app.security.auth import get_principal
+from app.security.tokens import TokenPrincipal
 
 REPO_ID = uuid.uuid4()
 REVIEW_ID = uuid.uuid4()
 FINDING_ID = uuid.uuid4()
 FEEDBACK_URL = "/api/v1/feedback"
+
+_ADMIN = TokenPrincipal(token_hash="test-admin", role="admin", label="test")
 
 
 def _seed_finding(store: MemoryOrchestratorStore) -> None:
@@ -76,6 +80,7 @@ def feedback_client() -> Iterator[tuple[TestClient, MemoryOrchestratorStore]]:
     app.dependency_overrides[get_feedback_limiter] = lambda: MemoryRateLimiter(
         per_ip_per_minute=100, per_repo_burst=2**31 - 1
     )
+    app.dependency_overrides[get_principal] = lambda: _ADMIN
     with TestClient(app) as client:
         yield client, store
     app.dependency_overrides.clear()
@@ -141,6 +146,7 @@ def test_unknown_finding_returns_404():
     app.dependency_overrides[get_feedback_limiter] = lambda: MemoryRateLimiter(
         per_ip_per_minute=100, per_repo_burst=2**31 - 1
     )
+    app.dependency_overrides[get_principal] = lambda: _ADMIN
     with TestClient(app) as client:
         body = _feedback_body(finding_id=uuid.uuid4())
         response = client.post(FEEDBACK_URL, json=body)
@@ -158,6 +164,7 @@ def test_invalid_outcome_rejected_422():
     app.dependency_overrides[get_feedback_limiter] = lambda: MemoryRateLimiter(
         per_ip_per_minute=100, per_repo_burst=2**31 - 1
     )
+    app.dependency_overrides[get_principal] = lambda: _ADMIN
     with TestClient(app) as client:
         body = _feedback_body(outcome="NOT_A_REAL_OUTCOME")
         response = client.post(FEEDBACK_URL, json=body)
@@ -174,6 +181,7 @@ def test_rate_limit_returns_429():
     limiter = MemoryRateLimiter(per_ip_per_minute=1, per_repo_burst=2**31 - 1)
     app.dependency_overrides[get_feedback_store] = lambda: store
     app.dependency_overrides[get_feedback_limiter] = lambda: limiter
+    app.dependency_overrides[get_principal] = lambda: _ADMIN
     with TestClient(app) as client:
         first = client.post(FEEDBACK_URL, json=_feedback_body())
         assert first.status_code == 201
@@ -193,8 +201,47 @@ def test_null_finding_id_rejected_422():
     app.dependency_overrides[get_feedback_limiter] = lambda: MemoryRateLimiter(
         per_ip_per_minute=100, per_repo_burst=2**31 - 1
     )
+    app.dependency_overrides[get_principal] = lambda: _ADMIN
     with TestClient(app) as client:
         body = _feedback_body(finding_id=None)
         response = client.post(FEEDBACK_URL, json=body)
     app.dependency_overrides.clear()
     assert response.status_code == 422
+
+
+# --- Phase 15 part 2: bearer-token gate + repo scope --------------------------
+
+
+def test_feedback_requires_bearer_token_directly(
+    feedback_client: tuple[TestClient, MemoryOrchestratorStore],
+):
+    """Without the fixture's principal override, the router-level gate 401s."""
+    client, _ = feedback_client
+    app.dependency_overrides.pop(get_principal, None)
+    response = client.post(FEEDBACK_URL, json=_feedback_body())
+    assert response.status_code == 401
+    assert response.json()["detail"]["code"] == "missing_bearer_token"
+
+
+def test_feedback_scoped_token_rejected_outside_scope(
+    feedback_client: tuple[TestClient, MemoryOrchestratorStore],
+):
+    """A token scoped to another repository cannot post feedback for REPO_ID."""
+    client, _ = feedback_client
+    scoped = TokenPrincipal(
+        token_hash="scoped", role="operator", repos={str(uuid.uuid4())}
+    )
+    app.dependency_overrides[get_principal] = lambda: scoped
+    response = client.post(FEEDBACK_URL, json=_feedback_body())
+    assert response.status_code == 403
+    assert response.json()["detail"]["code"] == "repository_out_of_scope"
+
+
+def test_feedback_scoped_token_allowed_inside_scope(
+    feedback_client: tuple[TestClient, MemoryOrchestratorStore],
+):
+    client, _ = feedback_client
+    scoped = TokenPrincipal(token_hash="scoped", role="operator", repos={str(REPO_ID)})
+    app.dependency_overrides[get_principal] = lambda: scoped
+    response = client.post(FEEDBACK_URL, json=_feedback_body())
+    assert response.status_code == 201

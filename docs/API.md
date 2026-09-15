@@ -105,10 +105,16 @@ Implemented (Phase 11): the endpoint resolves the repository **server-side from 
 finding** (not trusted from the body), persists the row idempotently (deterministic
 `feedback_id`), and rebuilds the repository memory snapshot on write (`repository_id`,
 `memory_version` in the response reflect the refreshed state). Per-IP rate limited.
+Since Phase 15 part 2 the endpoint additionally requires a bearer token (same
+`sk-…` dashboard token; repo-scoped tokens may only post feedback for repositories
+inside their scope) and sits behind the same router-level gate as the dashboard.
 
 Responses:
 - `201 Created` → `{ "feedback_id": "…", "recorded": true, "memory_version": 3 }`
+- `401` → `missing_bearer_token` / `invalid_token` (Phase 15)
+- `403` → `repository_out_of_scope` (scoped token outside its repositories)
 - `404` → `finding_not_found` (finding not found for the given review)
+- `413` → `body_too_large` (above `ADAPTIVE_MAX_REQUEST_BODY_BYTES`, Phase 15)
 - `422` schema rejection, `429` rate limited.
 
 A supplied `commit_sha` is stored as code-change evidence in `details`; it never
@@ -141,12 +147,14 @@ Liveness + dependency status:
 
 ---
 
-## 6. Auth model (design)
+## 6. Auth model (design → implemented)
 
-Public surface minimal: webhook endpoint authenticates by signature; dashboard/API
-endpoints use API keys (or OAuth app) issued to operators; feedback endpoint requires
-a valid token scoped to `feedback:write` for the repository. Full policy in
-`docs/SECURITY.md`.
+Public surface minimal: webhook endpoint authenticates by signature; dashboard/
+monitoring/feedback endpoints require an issued `sk-…` bearer token (digest-only
+storage, roles `viewer`/`operator`/`admin`, optional repository scope). The full
+gate (`get_principal`, `require_role`, `require_repo_access`) is in
+`backend/app/security/`; provisioning `ADAPTIVE_API_TOKEN_HASHES` / `_ROLES` /
+`_SCOPES` and policy details are in `docs/SECURITY.md` §4/§10–11.
 
 ---
 

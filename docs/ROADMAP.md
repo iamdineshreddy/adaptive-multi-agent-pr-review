@@ -21,7 +21,7 @@ pass.
 | 12 | Iterative review engine (diff vs last-reviewed, resolve/stale/target, re-score) | **done** (`backend/app/orchestrator/iteration.py` — pure broker/DB-free kernel: `plan_review_delta` classifies each previous finding against the new commit's changed/removed windows as `RESOLVED` (file removed; mechanical, never fed into feedback memory — FR-5.2) / `STALE` (region touched → re-evaluate, only the owning agents targeted — FR-6.2) / `KEEP` (untouched → carried forward at zero cost — ARUM.md §9 "round 2 cheaper and quieter"); line-gap tolerance via config `iteration_line_gap` (default 0), deterministic agent targeting from prompt-registry category ownership, `IterationPlan` with JSON-safe `diff_stats`, `TargetedAgentRunner` enforces the planned agent set loudly. Orchestrator: `run_review` gains `mode=SYNCHRONIZE` — scans from `last_reviewed_sha`, plans the delta before fan-out, applies dispositions (`apply_iteration_delta`), transitions the review to `ITERATING` (before AGENTS_RUNNING), swaps in the targeted runner; settled rounds land on `ITERATING` as the pre-publication checkpoint (publication is a later phase, as in Phase 9). All-resolved/empty-delta short-circuit to a defensive `_no_op_iteration` (record + complete, zero agents invoked) so re-review never fakes an empty agent round; a first sync with no previous findings stays a plain full review; the targeted subset is re-scored by ARUM and per-round selected/suppressed counts recorded. `OrchestratorStore` gains `apply_iteration_delta` + `record_iteration` (base/head sha, diff_stats, agents_invoked, published/resolved/stale counts) on Memory + Sql (idempotent round numbering, fixed unawaited-scalar bug), with a supervisor note summarising the delta. Note: the delta currently comes from the existing changed-file scope plumbing (`head_sha`/slices); a dedicated GitHub REST diff-fetch seam is a documented later wiring pass. 391 tests pass (10 live-DB self-skip) |
 | 13 | Frontend dashboard (React + TS + Tailwind): queues, reviews, findings, feedback, memory, metrics | **done** (dashboard read API + React dashboard, see split note below) |
 | 14 | Observability: Langfuse traces, Prometheus metrics, Grafana dashboards, structured logs | **done** (structured logs + Prometheus metrics + Grafana provisioning + Langfuse tracing; see split note below) |
-| 15 | Security hardening: auth, authz, rate limiting, injection defences, secret handling, audit | **part 1 done** (dashboard + monitoring API bearer-token authn/authz, see split note below) |
+| 15 | Security hardening: auth, authz, rate limiting, injection defences, secret handling, audit | **part 2 done** (feedback bearer-token + list scoping + body cap, see split note below) |
 | 16 | Testing: unit, integration, API, queue, agent, DB, RAG, adaptive, webhook; failure scenarios | todo |
 | 17 | Experiments: dataset (`github-codereview`) preprocessing, baselines, ablation, results, plots | todo |
 | 18 | Deployment: docker-compose (api/worker/scheduler/redis/postgres/frontend/prometheus/grafana) | todo |
@@ -100,9 +100,16 @@ only, constant-time compare, roles ranked viewer < operator < admin;
 `ADAPTIVE_API_TOKEN_HASHES`/`ROLES`/`SCOPES`). Router-level gate on dashboard +
 monitoring; repository detail/memory/feedback enforce per-repo scope; docs in
 `docs/SECURITY.md` §10; 431 tests pass (the dashboard/monitoring suites override
-`get_principal`, so they stay green with the gate in place). **Part 2** (next):
-feedback-endpoint bearer token, admin write actions + audit trail, injection/
-body-size caps, list-endpoint scope filtering.
+`get_principal`, so they stay green with the gate in place). **Part 2** (this
+pass): `POST /api/v1/feedback` is gated by the same bearer token (server-side
+repo resolution still applies; scoped tokens limited to their repositories),
+`GET /api/v1/repositories` filters by the caller's scope, and a request
+body-size cap (`ADAPTIVE_MAX_REQUEST_BODY_BYTES`, default 1 MiB → 413) guards
+the public write endpoints via `app/middleware/body_limit.py`; docs in
+`docs/SECURITY.md` §11; 437 tests pass. **Part 2b (next)**: admin write actions
++ their audit trail, which FR-7.3 must exercise against the not-yet-existing
+rerun/repository-settings routes — the audit records land with those routes
+rather than being fabricated against an endpoint surface that does not exist.
 
 ## Cross-cutting requirements (apply every phase)
 
