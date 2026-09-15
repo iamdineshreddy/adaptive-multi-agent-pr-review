@@ -2,9 +2,10 @@
 
 Phase 16 organizes and hardens the repository suite. Coverage is measured per
 phase; the current baseline is **84% line coverage over `backend/app`
-(4413 statements, 702 uncovered)**, with the bulk of uncovered code in the
-PostgreSQL/Redis-backed Sql+Redis implementations that need a live database and
-are exercised by the gated integration lane below (never by fakes).
+(4834 statements, 785 uncovered)**, with the bulk of uncovered code in the
+PostgreSQL/Redis-backed Sql+Redis implementations and the LLM/orchestration
+paths that need a live database or provider and are exercised by the gated
+integration lane below (never by fakes).
 
 ## Lanes
 
@@ -13,6 +14,7 @@ are exercised by the gated integration lane below (never by fakes).
 | Unit / core logic | `tests/test_*.py` (no integration/skip marker) | yes |
 | API contract | `tests/test_api_*.py`, `tests/test_webhooks.py`, `tests/test_health.py` | yes |
 | Queue tasks (celery wrappers) | `tests/test_queue_tasks.py` | yes |
+| Experiment harness (selection layer) | `tests/test_experiments_*.py` | yes |
 | Live-service integration (PostgreSQL) | `tests/test_db_integration.py`, `tests/test_orchestrator_db.py`, `tests/test_consolidation_db.py` | self-skip without a server |
 | Live-service pipeline (PostgreSQL + Redis) | `tests/test_integration_pipeline.py` | self-skip without services |
 
@@ -64,6 +66,11 @@ Execution-layer failure modes are unit-tested without a broker:
 - `tests/test_security_auth.py` and the API suites override `get_principal`
   (and rate limiter / store) via `app.dependency_overrides`; the bearer-token
   gate is exercised directly against the router in the same files.
+- The experiment harness suite (`tests/test_experiments_*.py`) pins the label
+  matrix (Auth.md rules), the ARUM §5 metric formulas, the B1..B5/ablation mode
+  switches and the runner's determinism and gate behaviour over hand-built
+  corpora. The bundled sample run (`experiments/run/run_all.py`) is a smoke
+  verification, not research data (see `docs/EXPERIMENTS.md`).
 - Coverage numbers are regenerated with:
 
   ```bash

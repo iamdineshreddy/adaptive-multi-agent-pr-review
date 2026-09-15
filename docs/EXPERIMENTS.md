@@ -83,3 +83,37 @@ Report delta vs B5 on the same seed/test split.
   experimental validation".
 - Citations for dataset/licensing included; baselines compared against literature
   without claiming novelty-by-assertion (see `docs/RESEARCH.md`).
+
+---
+
+## 7. Phase 17 status
+
+**Phase 17 part 1 (done):** the harness is built and unit-tested. What exists:
+
+- Label pre-processing implementing §1's decision table
+  (`backend/app/experiments/labeling.py`, `datasets/README.md`) plus the
+  `experiments/preprocessing/preprocess.py` CLI producing the labelled corpus
+  artifact + provenance manifest.
+- Baselines B1..B5 and ablations A1..A6 as declarative mode switches
+  (`backend/app/experiments/modes.py`) executed through the **same**
+  `app.adaptive` feature/score/select machinery (`runner.py`), with the ARUM §5
+  metrics (`metrics.py`), CSV/JSON outputs and the ablation-vs-B5 delta table
+  (`experiments/run/run_all.py`).
+
+What the harness deliberately does **not** claim:
+
+- Runs over the bundled `experiments/samples` corpus are smoke verification,
+  not research numbers (the sample is 5 reviews / 21 comments and is flagged as
+  such in every payload).
+- The agent layer (LLM detection, latency/token/cost) is not invoked; findings
+  come from the labelled corpus, so the harness measures the selection layer
+  deterministically and offline.
+
+**Phase 17 part 2 (next):**
+
+- `github-codereview` ingestion (license review + preprocessing of the real
+  corpus under `datasets/README.md`) and an executed run of the full table.
+- Literature comparison of the §2 baselines and the §1 label evidence (with
+  citations), plus matplotlib plots under `experiments/notebooks`.
+
+All numbers outside part 2 remain "Results pending experimental validation".

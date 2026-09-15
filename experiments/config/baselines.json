@@ -1,0 +1,6 @@
+{
+  "budget": 10,
+  "seed": 0,
+  "train_fraction": 0.8,
+  "note": "budget mirrors settings.review_budget_medium (app/config/settings.py:76); baseline/ablation mode definitions live in backend/app/experiments/modes.py so the config and the code cannot drift."
+}

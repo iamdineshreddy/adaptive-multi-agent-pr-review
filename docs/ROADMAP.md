@@ -23,7 +23,7 @@ pass.
 | 14 | Observability: Langfuse traces, Prometheus metrics, Grafana dashboards, structured logs | **done** (structured logs + Prometheus metrics + Grafana provisioning + Langfuse tracing; see split note below) |
 | 15 | Security hardening: auth, authz, rate limiting, injection defences, secret handling, audit | **part 2 done** (feedback bearer-token + list scoping + body cap, see split note below) |
 | 16 | Testing: unit, integration, API, queue, agent, DB, RAG, adaptive, webhook; failure scenarios | **part 1 done** (see split note below) |
-| 17 | Experiments: dataset (`github-codereview`) preprocessing, baselines, ablation, results, plots | todo |
+| 17 | Experiments: dataset (`github-codereview`) preprocessing, baselines, ablation, results, plots | **part 1 done** (see split note below) |
 | 18 | Deployment: docker-compose (api/worker/scheduler/redis/postgres/frontend/prometheus/grafana) | todo |
 | 19 | Research documentation: ARCHITECTURE.md refinement, RESEARCH.md, EXPERIMENTS.md, final README | todo |
 
@@ -128,6 +128,24 @@ delivery" seam; PostgreSQL+Redis-gated and self-skipping like its siblings).
 pipeline-triggered worker crash / restarted-in-flight scenario exercising the
 queue state machine under a real broker, and, with Phase 18 Compose, the
 broker-transport integration run.
+
+Phase 17 scope note (deliberate split): the experiment pipeline is built and
+gated first, so the dataset/result work has a verified, honest seam to run
+through (and the gate-carrying parts can never silently regress). **Part 1**
+(this pass): the reproducible harness under `backend/app/experiments/` plus the
+`experiments/` CLI layer — label pre-processing implementing §1's decision
+table with the Auth.md guard (corpus → `github-codereview`-shaped JSONL →
+labelled artifact + provenance manifest), the ARUM §5 metrics, the B1..B5 and
+A1..A6 baselines/ablations as declarative mode switches executed through the
+*same* `app.adaptive` feature/score/select machinery (no hand-wired alternate
+pipeline), CSV/JSON results and the ablation-vs-B5 delta table, and the
+end-to-end runner tests (`tests/test_experiments_*.py`; 39 new tests, 485 total
+pass). Results on the bundled smoke corpus are explicitly flagged as
+verification-only, never research numbers. **Part 2** (next): `github-codereview`
+ingestion under a documented license review, an executed run of the full table
+on the real corpus, literature comparison for §2 baselines, and matplotlib
+plots/analysis notebooks. Until part 2 runs, every results table remains
+"Results pending experimental validation".
 
 ## Cross-cutting requirements (apply every phase)
 
