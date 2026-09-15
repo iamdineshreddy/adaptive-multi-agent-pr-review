@@ -5,12 +5,20 @@ global:
 scrape_configs:
   - job_name: adaptive-review-api
     metrics_path: /api/v1/monitoring/prometheus
+    # Requires a Phase 15 bearer token (digest in ADAPTIVE_API_TOKEN_HASHES);
+    # viewer role is enough for read-only metrics.
+    authorization:
+      type: Bearer
+      credentials: ${ADAPTIVE_API_TOKEN}
     static_configs:
       - targets: ["api:8000"]
         labels:
           service: adaptive-review-api
   - job_name: adaptive-review-worker
     metrics_path: /api/v1/monitoring/prometheus
+    authorization:
+      type: Bearer
+      credentials: ${ADAPTIVE_API_TOKEN}
     static_configs:
       - targets: ["worker:8001"]
         labels:

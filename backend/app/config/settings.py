@@ -30,7 +30,9 @@ class Settings(BaseSettings):
     # --- Security ----------------------------------------------------------
     secret_key: str = ""
     github_webhook_secret: str = ""
-    api_token_hashes: list[str] = []  # salted hashes of API tokens
+    api_token_hashes: list[str] = []  # SHA-256 digests of bearer API tokens
+    api_token_roles: dict[str, str] = {}  # digest -> role (viewer|operator|admin)
+    api_token_scopes: dict[str, list[str]] = {}  # digest -> allowed repository ids
 
     # --- GitHub ------------------------------------------------------------
     github_app_id: str = ""

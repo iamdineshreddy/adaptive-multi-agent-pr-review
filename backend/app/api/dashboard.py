@@ -19,10 +19,12 @@ from app.orchestrator.persistence import (
     OrchestratorStore,
     SqlOrchestratorStore,
 )
+from app.security.auth import get_principal, require_repo_access
+from app.security.tokens import TokenPrincipal
 
 logger = structlog.get_logger(__name__)
 
-router = APIRouter(tags=["dashboard"])
+router = APIRouter(tags=["dashboard"], dependencies=[Depends(get_principal)])
 
 _store: OrchestratorStore | None = None
 
@@ -115,7 +117,9 @@ async def list_repositories(
 async def get_repository(
     repository_id: uuid.UUID,
     store: Annotated[OrchestratorStore, Depends(get_dashboard_store)],
+    principal: Annotated[TokenPrincipal, Depends(get_principal)],
 ) -> dict[str, Any]:
+    require_repo_access(repository_id, principal)
     detail = await store.repository_detail(repository_id)
     if detail is None:
         raise _not_found(f"repository '{repository_id}' not found")
@@ -130,7 +134,9 @@ async def get_repository(
 async def get_repository_memory(
     repository_id: uuid.UUID,
     store: Annotated[OrchestratorStore, Depends(get_dashboard_store)],
+    principal: Annotated[TokenPrincipal, Depends(get_principal)],
 ) -> dict[str, Any]:
+    require_repo_access(repository_id, principal)
     detail = await store.repository_memory(repository_id)
     if detail is None:
         raise _not_found(f"memory for repository '{repository_id}' not found")
@@ -145,9 +151,11 @@ async def get_repository_memory(
 async def get_repository_feedback(
     repository_id: uuid.UUID,
     store: Annotated[OrchestratorStore, Depends(get_dashboard_store)],
+    principal: Annotated[TokenPrincipal, Depends(get_principal)],
     limit: Annotated[int, Query(ge=1, le=100)] = 50,
     offset: Annotated[int, Query(ge=0)] = 0,
 ) -> list[dict[str, Any]]:
+    require_repo_access(repository_id, principal)
     return await store.repository_feedback(repository_id, limit=limit, offset=offset)
 
 

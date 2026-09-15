@@ -52,7 +52,11 @@ Provisioning lives under `infra/grafana/provisioning/`:
   metric names above
 
 Prometheus scrape config: `infra/prometheus/prometheus.yml` polls the API
-(`/api/v1/monitoring/prometheus`). Full compose wiring lands in Phase 18.
+(`/api/v1/monitoring/prometheus`). Since Phase 15, the monitoring endpoint is
+behind the dashboard bearer-token gate, so Prometheus must present one:
+`authorization: { type: Bearer, credentials: <sk-... > }` where the token's
+digest is provisioned in `ADAPTIVE_API_TOKEN_HASHES` (all verbs are read-only,
+so a `viewer` token suffices). Full compose wiring lands in Phase 18.
 
 ## Langfuse LLM traces
 

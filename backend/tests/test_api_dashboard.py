@@ -17,12 +17,16 @@ from app.api.dashboard import get_dashboard_store
 from app.main import app
 from app.models.enums import FindingStatus, ReviewStatus
 from app.orchestrator.persistence import MemoryOrchestratorStore
+from app.security.auth import get_principal
+from app.security.tokens import TokenPrincipal
 
 REVIEW_ID = uuid.uuid4()
 REVIEW_ID_2 = uuid.uuid4()
 FINDING_ID = uuid.uuid4()
 REPO_ID = uuid.uuid4()
 REPO_ID_2 = uuid.uuid4()
+
+_ADMIN = TokenPrincipal(token_hash="test-admin", role="admin", label="test")
 
 
 def _seed(store: MemoryOrchestratorStore) -> None:
@@ -107,6 +111,7 @@ def dashboard_client() -> Iterator[tuple[TestClient, MemoryOrchestratorStore]]:
     store = MemoryOrchestratorStore()
     _seed(store)
     app.dependency_overrides[get_dashboard_store] = lambda: store
+    app.dependency_overrides[get_principal] = lambda: _ADMIN
     with TestClient(app) as client:
         yield client, store
     app.dependency_overrides.clear()

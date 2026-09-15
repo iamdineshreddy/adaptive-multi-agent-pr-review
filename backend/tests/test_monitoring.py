@@ -22,9 +22,13 @@ from app.models.enums import ReviewStatus
 from app.monitoring import logsetup
 from app.monitoring import prometheus as metrics
 from app.orchestrator.persistence import MemoryOrchestratorStore
+from app.security.auth import get_principal
+from app.security.tokens import TokenPrincipal
 
 REVIEW_ID = uuid.uuid4()
 REPO_ID = uuid.uuid4()
+
+_ADMIN = TokenPrincipal(token_hash="test-admin", role="admin", label="test")
 
 
 def _seeded_store() -> MemoryOrchestratorStore:
@@ -51,6 +55,7 @@ def _seeded_store() -> MemoryOrchestratorStore:
 def dashboard_client() -> Iterator[tuple[TestClient, MemoryOrchestratorStore]]:
     store = _seeded_store()
     app.dependency_overrides[get_dashboard_store] = lambda: store
+    app.dependency_overrides[get_principal] = lambda: _ADMIN
     with TestClient(app) as client:
         yield client, store
     app.dependency_overrides.clear()

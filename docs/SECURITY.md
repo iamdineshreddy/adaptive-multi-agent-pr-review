@@ -58,3 +58,22 @@ doc pins the requirements now.
 - Test suite: signature verification, injection suite, isolation, auth matrix.
 - A `SECURITY.md` implementation appendix is added after Phase 15 with concrete
   findings and checks (no hidden assumptions).
+
+## 10. Implementation appendix (Phase 15, part 1 — authn/authz)
+
+- `app/security/tokens.py` — bearer-token primitives: `sk-` tokens are random
+  (32-byte URL-safe); only SHA-256 digests are stored
+  (`ADAPTIVE_API_TOKEN_HASHES`); lookups use constant-time compare
+  (`hmac.compare_digest`); `issue_token(label, role, repos)` provisions a token
+  whose plaintext is shown once; roles are ranked `viewer < operator < admin`.
+- `app/security/auth.py` — FastAPI gate `get_principal` (Bearer header, `401`
+  with `WWW-Authenticate` on missing/unknown), `require_role(minimum)` (`403`),
+  `require_repo_access` (repo-scoped principals get `403` outside their set),
+  and `SettingsTokenProvider` reading `ADAPTIVE_API_TOKEN_HASHES` /
+  `ADAPTIVE_API_TOKEN_ROLES` / `ADAPTIVE_API_TOKEN_SCOPES` (digest → role,
+  digest → allowed repository ids; empty/absent scope = all repositories).
+- Every dashboard + monitoring endpoint is behind the gate (router-level
+  dependency). Repository detail/memory/feedback additionally enforce the
+  principal's repo scope (dedicated isolation tests).
+- Left for part 2 in this phase: feedback-endpoint bearer token, admin write
+  actions + their audit trail, and request body/size caps.

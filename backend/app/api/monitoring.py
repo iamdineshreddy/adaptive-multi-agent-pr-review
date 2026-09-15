@@ -17,10 +17,11 @@ from fastapi import APIRouter, Depends, Response
 from app.api.dashboard import get_dashboard_store
 from app.monitoring import prometheus as metrics
 from app.orchestrator.persistence import OrchestratorStore
+from app.security.auth import get_principal
 
 logger = structlog.get_logger(__name__)
 
-router = APIRouter(tags=["monitoring"])
+router = APIRouter(tags=["monitoring"], dependencies=[Depends(get_principal)])
 
 
 @router.get(
