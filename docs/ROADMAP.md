@@ -24,7 +24,7 @@ pass.
 | 15 | Security hardening: auth, authz, rate limiting, injection defences, secret handling, audit | **part 2 done** (feedback bearer-token + list scoping + body cap, see split note below) |
 | 16 | Testing: unit, integration, API, queue, agent, DB, RAG, adaptive, webhook; failure scenarios | **part 1 done** (see split note below) |
 | 17 | Experiments: dataset (`github-codereview`) preprocessing, baselines, ablation, results, plots | **part 1 done** (see split note below) |
-| 18 | Deployment: docker-compose (api/worker/scheduler/redis/postgres/frontend/prometheus/grafana) | todo |
+| 18 | Deployment: docker-compose (api/worker/scheduler/redis/postgres/frontend/prometheus/grafana) | **part 1 done** (see split note below) |
 | 19 | Research documentation: ARCHITECTURE.md refinement, RESEARCH.md, EXPERIMENTS.md, final README | todo |
 
 Phase gating rule: **no phase starts until the previous phase's tests pass.** When a
@@ -146,6 +146,26 @@ ingestion under a documented license review, an executed run of the full table
 on the real corpus, literature comparison for §2 baselines, and matplotlib
 plots/analysis notebooks. Until part 2 runs, every results table remains
 "Results pending experimental validation".
+
+Phase 18 scope note (deliberate split): deployment assets are written and gated
+first; the live-stack proof (``docker compose up`` boot, a webhook ingestion
+end-to-end against the running stack, Prometheus scraping both targets, Grafana
+dashboard rendering) requires a Docker host. **Part 1** (this pass): the
+compose topology (`docker-compose.yml`: postgres/redis/api/worker/scheduler/
+frontend/prometheus/grafana with healthchecks, volumes, dual networks), shared
+backend image (`infra/docker/backend/Dockerfile` + entrypoint running
+`alembic upgrade head`), frontend image (node build → nginx with `/api` proxy
++ SPA fallback), `.env.example` (no secrets in compose), a Celery beat schedule
+(`queue.pop_and_stage` every `ADAPTIVE_SCHEDULER_INTERVAL_SECONDS`) wired via a
+new setting, and the worker-process Prometheus exporter
+(`app.monitoring.worker_exporter` — the API's own auth gate + rollup→gauge
+pipeline on the worker's :8001, so the queue stays observable with the API
+down; `monitoring.prometheus` gained a shared `render_prometheus_payload`
+helper used by both endpoints). Tests: `tests/test_monitoring_worker_exporter.py`
++ beat-schedule assertion (5 new tests). docs/DEPLOYMENT.md is the runbook
+(env/secrets, scaling, backup, observability). **Part 2** (next, needs a Docker
+host): the compose boot smoke plus the broker-transport run deferred from Phase
+16 part 2, which this stack finally provides the real broker for.
 
 ## Cross-cutting requirements (apply every phase)
 

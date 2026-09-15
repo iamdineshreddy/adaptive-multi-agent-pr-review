@@ -112,6 +112,9 @@ class Settings(BaseSettings):
     celery_priority_redis_key: str = "adaptive_review:priority"
     celery_dead_letter_redis_key: str = "adaptive_review:dead_letter"
     queue_dispatch_provider: str = "celery"  # "celery" | "logging"
+    # Celery beat cadence: how often the scheduler pops the highest-priority
+    # review and hands it to the orchestrator fan-out (queue.pop_and_stage).
+    scheduler_interval_seconds: int = 30
 
     # --- Orchestrator (docs/AGENTS.md §2) -----------------------------------
     orchestrator_max_agent_retries: int = 2  # bounded agent retries on transient errors

@@ -1,0 +1,5 @@
+# Shell scripts must ship with LF so container entrypoints run on Linux.
+*.sh text eol=lf
+
+# Reproducible corpus/JSONL data stays byte-identical on any checkout.
+*.jsonl text eol=lf

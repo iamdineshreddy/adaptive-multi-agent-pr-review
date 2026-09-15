@@ -16,6 +16,7 @@ from typing import cast
 import pytest
 from celery.exceptions import MaxRetriesExceededError
 
+from app.queue.celery_app import celery_app
 from app.queue.deadletter import DeadLetterEntry
 from app.queue.priority import PriorityEntry
 from app.queue.tasks import enqueue_review_task, pop_and_stage_task
@@ -161,3 +162,10 @@ class TestPopAndStageTask:
         store = _FakeStore()
         monkeypatch.setattr("app.queue.tasks.RedisPriorityStore", lambda: store)
         assert pop_and_stage_task() is None
+
+
+def test_beat_schedule_runs_pop_and_stage_on_default_queue() -> None:
+    schedule = celery_app.conf.beat_schedule
+    assert schedule["pop-and-stage"]["task"] == "queue.pop_and_stage"
+    assert schedule["pop-and-stage"]["schedule"] > 0
+    assert celery_app.conf.task_routes["queue.pop_and_stage"]["queue"] == "default"

@@ -1,0 +1,19 @@
+# Keeps the build context (repo root) slim for the backend image.
+backend/.venv/
+**/__pycache__/
+**/*.py[cod]
+**/.pytest_cache/
+**/.mypy_cache/
+**/.ruff_cache/
+backend/tests/
+backend/dist/
+backend/*.egg-info/
+.coverage
+htmlcov/
+frontend/node_modules/
+frontend/dist/
+frontend/.vite/
+datasets/raw/
+experiments/results/
+docs/
+.git/

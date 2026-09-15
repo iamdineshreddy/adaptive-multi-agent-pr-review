@@ -58,6 +58,15 @@ def create_celery(settings: Settings | None = None) -> Celery:
         task_routes=TASK_ROUTES,
         broker_connection_retry_on_startup=True,
     )
+    app.conf.beat_schedule = {
+        # Scheduler container (Phase 18): pop the highest-priority staged review
+        # and hand it to queue.pop_and_dispatch (orchestrator fan-out). Celery
+        # beat only starts this when invoked with ``celery beat``.
+        "pop-and-stage": {
+            "task": "queue.pop_and_stage",
+            "schedule": cfg.scheduler_interval_seconds,
+        },
+    }
     return app
 
 

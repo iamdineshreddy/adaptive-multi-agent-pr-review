@@ -2,7 +2,7 @@
 
 Phase 16 organizes and hardens the repository suite. Coverage is measured per
 phase; the current baseline is **84% line coverage over `backend/app`
-(4834 statements, 785 uncovered)**, with the bulk of uncovered code in the
+(4854 statements, 785 uncovered)**, with the bulk of uncovered code in the
 PostgreSQL/Redis-backed Sql+Redis implementations and the LLM/orchestration
 paths that need a live database or provider and are exercised by the gated
 integration lane below (never by fakes).
@@ -15,13 +15,14 @@ integration lane below (never by fakes).
 | API contract | `tests/test_api_*.py`, `tests/test_webhooks.py`, `tests/test_health.py` | yes |
 | Queue tasks (celery wrappers) | `tests/test_queue_tasks.py` | yes |
 | Experiment harness (selection layer) | `tests/test_experiments_*.py` | yes |
+| Worker metrics exporter | `tests/test_monitoring_worker_exporter.py` | yes |
 | Live-service integration (PostgreSQL) | `tests/test_db_integration.py`, `tests/test_orchestrator_db.py`, `tests/test_consolidation_db.py` | self-skip without a server |
 | Live-service pipeline (PostgreSQL + Redis) | `tests/test_integration_pipeline.py` | self-skip without services |
 
 ## Running the gate
 
 ```bash
-python -m pytest -q            # 446 passed / 11 skipped (10 live-DB, 1 pipeline)
+python -m pytest -q            # 490 passed / 11 skipped (10 live-DB, 1 pipeline)
 python -m ruff check .
 python -m ruff format --check .
 python -m mypy app
@@ -71,6 +72,11 @@ Execution-layer failure modes are unit-tested without a broker:
   switches and the runner's determinism and gate behaviour over hand-built
   corpora. The bundled sample run (`experiments/run/run_all.py`) is a smoke
   verification, not research data (see `docs/EXPERIMENTS.md`).
+- The worker exporter suite (`tests/test_monitoring_worker_exporter.py`) pins
+  the separate `worker:8001` scrape endpoint (bearer gate, health probe, shared
+  rollup→gauge pipeline) that Phase 18 compose wires; deployment assets
+  themselves are static and their boot smoke is pending a Docker host
+  (`docs/DEPLOYMENT.md`).
 - Coverage numbers are regenerated with:
 
   ```bash

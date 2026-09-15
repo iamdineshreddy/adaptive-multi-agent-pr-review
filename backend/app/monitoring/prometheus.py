@@ -17,13 +17,33 @@ from __future__ import annotations
 
 import functools
 from collections.abc import Callable
-from typing import Any
+from typing import Any, Protocol
 
 import structlog
 
 from app.config.settings import settings
 
 logger = structlog.get_logger(__name__)
+
+
+class RollupSource(Protocol):
+    """Anything exposing an ORM-agnostic ``metrics_rollup`` (store or a fake)."""
+
+    async def metrics_rollup(self) -> dict[str, Any]: ...
+
+
+async def render_prometheus_payload(store: RollupSource) -> tuple[str, str]:
+    """Refresh store-derived gauges and render the full exposition payload.
+
+    The API router and the worker-process exporter both go through here so the
+    two scraped endpoints can never diverge: same rollup -> same gauges -> same
+    text format.
+    """
+    if prometheus_available():
+        rollup = await store.metrics_rollup()
+        update_store_gauges(rollup)
+    return render_metrics()
+
 
 _PROMETHEUS_CLIENT_PRESENT = True
 _PROMETHEUS_UNAVAILABLE: Callable[[], str] | None = None

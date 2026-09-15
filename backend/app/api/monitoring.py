@@ -33,8 +33,5 @@ async def prometheus_metrics(
     store: Annotated[OrchestratorStore, Depends(get_dashboard_store)],
 ) -> Response:
     """Render current counters + store-derived gauges as Prometheus text."""
-    if metrics.prometheus_available():
-        rollup = await store.metrics_rollup()
-        metrics.update_store_gauges(rollup)
-    body, content_type = metrics.render_metrics()
+    body, content_type = await metrics.render_prometheus_payload(store)
     return Response(content=body, media_type=content_type)

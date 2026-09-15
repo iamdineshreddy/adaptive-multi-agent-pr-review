@@ -1,0 +1,208 @@
+# Adaptive Multi-Agent AI PR Review — full platform compose (Phase 18).
+#
+# Services: postgres, redis, api, worker, scheduler (celery beat), frontend,
+# prometheus, grafana. All env/secret values come from the repository-root .env
+# via ${VAR:-default}; nothing secret is hardcoded here.
+#
+# Note: verification of a live `docker compose up` boot requires a Docker host
+# (see docs/DEPLOYMENT.md). Docs and integration tests carry the coupling; the
+# unit suite never depends on a running stack.
+
+name: adaptive-review
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-adaptive}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-adaptive}
+      POSTGRES_DB: ${POSTGRES_DB:-adaptive_review}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+    networks: [adaptive]
+    restart: unless-stopped
+
+  redis:
+    image: redis:7-alpine
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes:
+      - redisdata:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+    networks: [adaptive]
+    restart: unless-stopped
+
+  api:
+    build:
+      context: .
+      dockerfile: infra/docker/backend/Dockerfile
+    command:
+      ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
+    environment: &backend_env
+      ADAPTIVE_ENV: ${ADAPTIVE_ENV:-development}
+      ADAPTIVE_LOG_LEVEL: ${ADAPTIVE_LOG_LEVEL:-info}
+      ADAPTIVE_DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-adaptive}:${POSTGRES_PASSWORD:-adaptive}@postgres:5432/${POSTGRES_DB:-adaptive_review}
+      ADAPTIVE_REDIS_URL: redis://redis:6379/0
+      ADAPTIVE_SECRET_KEY: ${ADAPTIVE_SECRET_KEY:-}
+      ADAPTIVE_GITHUB_WEBHOOK_SECRET: ${ADAPTIVE_GITHUB_WEBHOOK_SECRET:-}
+      ADAPTIVE_GITHUB_APP_ID: ${ADAPTIVE_GITHUB_APP_ID:-}
+      ADAPTIVE_GITHUB_APP_PRIVATE_KEY: ${ADAPTIVE_GITHUB_APP_PRIVATE_KEY:-}
+      ADAPTIVE_GITHUB_PAT: ${ADAPTIVE_GITHUB_PAT:-}
+      ADAPTIVE_API_TOKEN_HASHES: ${ADAPTIVE_API_TOKEN_HASHES:-[]}
+      ADAPTIVE_API_TOKEN_ROLES: ${ADAPTIVE_API_TOKEN_ROLES:-{}}
+      ADAPTIVE_LLM_PROVIDER: ${ADAPTIVE_LLM_PROVIDER:-mock}
+      ADAPTIVE_OPENAI_API_KEY: ${ADAPTIVE_OPENAI_API_KEY:-}
+      ADAPTIVE_ANTHROPIC_API_KEY: ${ADAPTIVE_ANTHROPIC_API_KEY:-}
+      ADAPTIVE_LANGFUSE_PUBLIC_KEY: ${ADAPTIVE_LANGFUSE_PUBLIC_KEY:-}
+      ADAPTIVE_LANGFUSE_SECRET_KEY: ${ADAPTIVE_LANGFUSE_SECRET_KEY:-}
+      ADAPTIVE_LANGFUSE_HOST: ${ADAPTIVE_LANGFUSE_HOST:-}
+      ADAPTIVE_PROMETHEUS_ENABLED: ${ADAPTIVE_PROMETHEUS_ENABLED:-true}
+    ports:
+      - "8000:8000"
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=2).status==200 else 1)",
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 20s
+    depends_on:
+      postgres: { condition: service_healthy }
+      redis: { condition: service_healthy }
+    networks: [adaptive, observability]
+    restart: unless-stopped
+
+  worker:
+    build:
+      context: .
+      dockerfile: infra/docker/backend/Dockerfile
+    # Runs the Celery worker and the :8001 Prometheus exporter side-by-side.
+    # The exporter is a separate ASGI process so queue health stays observable
+    # even if the api container is down.
+    command:
+      - /bin/sh
+      - -c
+      - >
+        uvicorn app.monitoring.worker_exporter:worker_app --host 0.0.0.0 --port 8001 &
+        exec celery -A app.queue.celery_app:celery_app worker -n worker@%h
+        -Q default,review_task_queue,pr_ingestion_queue,security_queue,quality_queue,performance_queue,architecture_queue,standards_queue,decision_queue,publisher_queue,feedback_queue
+        -l ${ADAPTIVE_LOG_LEVEL:-info}
+    environment:
+      <<: *backend_env
+      ADAPTIVE_SKIP_MIGRATIONS: "true"
+    ports:
+      - "8001:8001"
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8001/health', timeout=2).status==200 else 1)",
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 20s
+    depends_on:
+      postgres: { condition: service_healthy }
+      redis: { condition: service_healthy }
+    networks: [adaptive, observability]
+    restart: unless-stopped
+
+  scheduler:
+    build:
+      context: .
+      dockerfile: infra/docker/backend/Dockerfile
+    # Celery beat fires queue.pop_and_stage every ADAPTIVE_SCHEDULER_INTERVAL_SECONDS
+    # (routed to the default queue, consumed by the worker).
+    command:
+      [
+        "celery",
+        "-A",
+        "app.queue.celery_app:celery_app",
+        "beat",
+        "-l",
+        "${ADAPTIVE_LOG_LEVEL:-info}",
+      ]
+    environment:
+      <<: *backend_env
+      ADAPTIVE_SKIP_MIGRATIONS: "true"
+      ADAPTIVE_SCHEDULER_INTERVAL_SECONDS: ${ADAPTIVE_SCHEDULER_INTERVAL_SECONDS:-30}
+    depends_on:
+      redis: { condition: service_healthy }
+    networks: [adaptive]
+    restart: unless-stopped
+
+  frontend:
+    build:
+      context: .
+      dockerfile: infra/docker/frontend/Dockerfile
+    ports:
+      - "80:80"
+    depends_on:
+      api: { condition: service_healthy }
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1/ || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+    networks: [adaptive]
+    restart: unless-stopped
+
+  prometheus:
+    image: prom/prometheus:latest
+    command: ["--config.file=/etc/prometheus/prometheus.yml"]
+    environment:
+      ADAPTIVE_API_TOKEN: ${ADAPTIVE_API_TOKEN:-}
+    volumes:
+      - ./infra/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - promdata:/prometheus
+    ports:
+      - "9090:9090"
+    depends_on:
+      api: { condition: service_started }
+      worker: { condition: service_started }
+    networks: [observability]
+    restart: unless-stopped
+
+  grafana:
+    image: grafana/grafana:latest
+    environment:
+      GF_SECURITY_ADMIN_USER: ${GRAFANA_ADMIN_USER:-admin}
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:-admin}
+      GF_USERS_ALLOW_SIGN_UP: "false"
+    volumes:
+      - ./infra/grafana/provisioning:/etc/grafana/provisioning:ro
+      - grafanadata:/var/lib/grafana
+    ports:
+      - "3000:3000"
+    depends_on:
+      prometheus: { condition: service_started }
+    networks: [observability]
+    restart: unless-stopped
+
+volumes:
+  pgdata: {}
+  redisdata: {}
+  promdata: {}
+  grafanadata: {}
+
+networks:
+  # Postgres/redis + the app services + dashboard frontend.
+  adaptive: {}
+  # Metrics/telemetry: api + worker are scraped by prometheus; grafana reads it.
+  observability: {}

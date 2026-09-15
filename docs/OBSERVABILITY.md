@@ -52,11 +52,15 @@ Provisioning lives under `infra/grafana/provisioning/`:
   metric names above
 
 Prometheus scrape config: `infra/prometheus/prometheus.yml` polls the API
-(`/api/v1/monitoring/prometheus`). Since Phase 15, the monitoring endpoint is
+(`/api/v1/monitoring/prometheus`) and the worker's own exporter
+(`worker:8001`, `app.monitoring.worker_exporter` — the same rollup → gauge →
+text pipeline served from the worker process so queue health stays observable
+with the API down). Since Phase 15, the monitoring endpoint is
 behind the dashboard bearer-token gate, so Prometheus must present one:
 `authorization: { type: Bearer, credentials: <sk-... > }` where the token's
 digest is provisioned in `ADAPTIVE_API_TOKEN_HASHES` (all verbs are read-only,
-so a `viewer` token suffices). Full compose wiring lands in Phase 18.
+so a `viewer` token suffices). Full compose wiring landed in Phase 18
+(docs/DEPLOYMENT.md); the live stack smoke is pending a Docker host.
 
 ## Langfuse LLM traces
 
