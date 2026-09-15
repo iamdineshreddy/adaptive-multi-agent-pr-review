@@ -1,7 +1,9 @@
 # System Architecture
 
 This document specifies the architecture of the **Adaptive Multi-Agent AI System for
-GitHub Pull Request Review**. It is the primary Phase 1 deliverable.
+GitHub Pull Request Review**. It is the primary Phase 1 deliverable and is refined
+in Phase 19 to match the implemented system (publication and GitHub comment
+posting remain explicitly pending — §4.5).
 
 ---
 
@@ -37,17 +39,20 @@ GitHub Pull Request Review**. It is the primary Phase 1 deliverable.
 | G | Redundancy Detection Layer | Semantic grouping of duplicate findings |
 | H | Adaptive Review Utility Model (ARUM) | Scores and ranks findings for publication |
 | I | Review Budget Controller | Caps published findings per risk class, honours safety gates |
-| J | GitHub Review Publisher | Writes review comments adhering to diff line anchors + rate limits |
+| J | GitHub Review Publisher | Writes review comments adhering to diff line anchors + rate limits — **pending (later phase); findings today are selected and scheduled, never posted** |
 | K | Developer Feedback Collector | Captures developer outcomes from PR activity and API |
 | L | Repository-Specific Review Memory | Per-repo historical aggregates, standards, preferences |
 | M | RAG Retrieval System | pgvector retrieval of similar findings/decisions/standards |
-| N | Adaptive Learning Module | Updates ARUM weights and memory from feedback |
+| N | Adaptive Learning Module | Updates ARUM weights and memory from feedback (never auto-promoted) |
 | O | Iterative Review Engine | Diff-aware re-review across new commits |
 | P | PostgreSQL | Primary store (SQLAlchemy + asyncpg + Alembic) |
-| Q | Redis | Broker, result backend, transient locks, rate-limit counters |
+| Q | Redis | Broker, result backend, priority zset, dead-letter log |
 | R | Celery Workers | Execute queues (ingestion, agents, decision, publisher, feedback) |
-| S | FastAPI APIs | HTTP surface for webhooks, queries, feedback, metrics, health |
-| T | Observability System | Langfuse (LLM traces), Prometheus/Grafana (metrics) |
+| S | FastAPI APIs | HTTP surface for webhooks, dashboard reads, feedback, metrics, health |
+| T | Observability System | Langfuse (LLM traces), Prometheus/Grafana (metrics + logs; worker-side exporter) |
+| U | Dashboard (frontend) | React + TypeScript + Tailwind SPA over the Phase 13 read APIs |
+| V | Experiment Harness | Label pre-processing + baseline/ablation runner over the same `app.adaptive` code |
+| W | Deployment Stack | Docker Compose: postgres/redis/api/worker/scheduler/frontend/prometheus/grafana |
 
 ---
 
@@ -126,9 +131,14 @@ States (persisted on the `review` row):
 
 ```text
 RECEIVED → QUEUED → PROCESSING
-     → AGENTS_RUNNING → CONSOLIDATING → DECIDING → PUBLISHED
-     → WAITING_FOR_FEEDBACK → ITERATING → PUBLISHED (final)
+     → AGENTS_RUNNING → CONSOLIDATING → DECIDING → PUBLISHED*
+     → WAITING_FOR_FEEDBACK → ITERATING → DECIDING → PUBLISHED* (final)
 RECEIVED/QUEUED/etc → FAILED (with retry) → CANCELLED
+
+* PUBLISHED is the later-phase target of the PUBLISH step (component J). The
+  implemented graph terminates on the DECIDING checkpoint (selection recorded,
+  publication to GitHub pending) or ITERATING for settled rounds; nothing marks
+  a review PUBLISHED today.
 ```
 
 Transitions are enforced by the orchestrator; every state change is time-stamped.
@@ -155,9 +165,11 @@ Transitions are enforced by the orchestrator; every state change is time-stamped
    findings are ranked.
 4. **Budget (I)**: up to N findings are selected based on PR risk class and ARUM rank,
    honouring safety gates (critical/high-confidence findings protected).
-5. **Publisher (J)**: creates a single GitHub review with line-anchored comments
-   (no carve-outs for secrets; tokens are never emitted into comments).
-6. Review transitions to `PUBLISHED`, then `WAITING_FOR_FEEDBACK`.
+5. **Checkpoint, not publication**: the review lands on `DECIDING` with selected
+   representatives marked `publication_status=scheduled` and suppressed/truncated
+   findings marked `suppressed`. The **PUBLISH step (J)** that posts GitHub review
+   comments is a later phase and is never simulated — nothing sets `PUBLISHED` for a
+   review until that step exists (see `docs/ROADMAP.md`).
 
 ### 4.6 Feedback capture
 
@@ -232,10 +244,13 @@ counters per queue.
 
 | System | What it captures |
 | --- | --- |
-| Langfuse | LLM traces per agent: prompt, structured output, tokens, cost, latency |
-| Prometheus | Queue depth, processing time, agent duration, findings gen/pub/suppressed, redundancy rate, feedback outcome counts, provider error rates, retries |
-| Grafana | Dashboards: PR throughput, queue health, agent health, decision quality, cost |
-| Application logs | Structured JSON logs with `review_id`, `repository_id`, no secrets |
+| Langfuse | LLM traces per agent: prompt, structured output, tokens, cost, latency (strictly gated on keys) |
+| Prometheus | Webhook/feedback counters, reviews/findings/feedback gauges, redundancy rate, agent token/cost/latency; scraped from **both** the API and a worker-side exporter (`app.monitoring.worker_exporter`, `worker:8001`) so queue health stays observable with the API down |
+| Grafana | Provisioned dashboard over the real metric names (adaptive-review) |
+| Application logs | Structured JSON logs with `review_id`, `repository_id`, no secrets (redaction processor) |
+
+Full wiring (scrape config, dashboards, compose) is documented in
+`docs/OBSERVABILITY.md` and `docs/DEPLOYMENT.md`.
 
 ---
 
@@ -257,5 +272,17 @@ counters per queue.
 6. **Why `code changed ≠ accepted`?** A change can be a workaround, a revert, or an
    unrelated refactor. Auto-labelling acceptance corrupts the feedback signal used to
    train ARUM, so outcome labelling is explicit.
+7. **Why the experiment harness reuses the product code?** Baselines/ablations are
+   `dataclasses`-switch flags over the *same* features/scoring/selection modules the
+   product runs — a hand-wired alternate pipeline would measure a different system.
+8. **Why a worker-side Prometheus exporter (`worker:8001`)?** Scraping the queue's own
+   process keeps health signal when the API container is down; it serves the identical
+   auth gate + rollup→gauge pipeline so the two endpoints cannot diverge.
+9. **Why one backend image for api/worker/scheduler?** Identical dependency sets,
+   minimal surface; compose overrides only the `command`. The scheduler is Celery
+   beat firing `queue.pop_and_stage` on a configured interval; migrations run once in
+   the api entrypoint (`ADAPTIVE_SKIP_MIGRATIONS` on the other runtimes).
+10. **Why dual compose networks?** PostgreSQL/Redis stay off the frontend and metrics
+    networks; only api/worker straddle the observability network for scraping.
 
 See `docs/EXPERIMENTS.md` for how each architectural choice above is evaluated.

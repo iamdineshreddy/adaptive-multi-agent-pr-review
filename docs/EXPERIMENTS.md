@@ -117,3 +117,19 @@ What the harness deliberately does **not** claim:
   citations), plus matplotlib plots under `experiments/notebooks`.
 
 All numbers outside part 2 remain "Results pending experimental validation".
+
+---
+
+## 8. Dataset & licensing status (Phase 17 part 2)
+
+- The primary corpus (`github-codereview`) is **not shipped or downloaded**:
+  `datasets/raw/` is gitignored, and no raw data has been ingested into the
+  pipeline yet.
+- Ingestion starts only after the license review note lands in
+  `datasets/README.md` (upstream dataset + upstream repositories), including a
+  provenance hash in the preprocess manifest per component.
+- The bundled `experiments/samples` corpus is a smoke fixture produced by hand
+  (5 reviews / 21 comments) — it evidences pipeline behaviour, not results.
+- Related-work comparison targets are listed in `docs/RESEARCH.md` §3; any
+  baseline/ablation number compared against them will cite the specific work and
+  state the comparison protocol at the time of the run.

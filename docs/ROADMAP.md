@@ -25,7 +25,7 @@ pass.
 | 16 | Testing: unit, integration, API, queue, agent, DB, RAG, adaptive, webhook; failure scenarios | **part 1 done** (see split note below) |
 | 17 | Experiments: dataset (`github-codereview`) preprocessing, baselines, ablation, results, plots | **part 1 done** (see split note below) |
 | 18 | Deployment: docker-compose (api/worker/scheduler/redis/postgres/frontend/prometheus/grafana) | **part 1 done** (see split note below) |
-| 19 | Research documentation: ARCHITECTURE.md refinement, RESEARCH.md, EXPERIMENTS.md, final README | todo |
+| 19 | Research documentation: ARCHITECTURE.md refinement, RESEARCH.md, EXPERIMENTS.md, final README | **done** (ARCHITECTURE.md aligned to the implemented system incl. the honest no-false-publication checkpoint; RESEARCH.md fleshed out — research questions, cited related-work plan with verification rule, evaluation plan, limitations, ethics, paper scaffold; EXPERIMENTS.md dataset/licensing + related-work anchor; README.md refreshed — cleaned diagram, accurate layout/status, quickstart, integrity statement; all deferred parts remain explicitly pending — no invented numbers or publication claims) |
 
 Phase gating rule: **no phase starts until the previous phase's tests pass.** When a
 phase cannot be completed as specified, it is split and documented (never silently
