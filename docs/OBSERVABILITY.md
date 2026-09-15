@@ -1,7 +1,7 @@
 # Observability (Phase 14)
 
-Covers structured logs, Prometheus metrics exposition, and the metrics you can
-dashboards on. Langfuse LLM trace export is a documented later pass (Part 2).
+Covers structured logs, Prometheus metrics exposition, the metrics you can
+dashboard on, and (gated) Langfuse LLM trace export.
 
 ## Structured logs
 
@@ -54,11 +54,23 @@ Provisioning lives under `infra/grafana/provisioning/`:
 Prometheus scrape config: `infra/prometheus/prometheus.yml` polls the API
 (`/api/v1/monitoring/prometheus`). Full compose wiring lands in Phase 18.
 
-## Langfuse (Part 2 — deferred)
+## Langfuse LLM traces
 
 `ADAPTIVE_LANGFUSE_PUBLIC_KEY` / `ADAPTIVE_LANGFUSE_SECRET_KEY` /
-`ADAPTIVE_LANGFUSE_HOST` are already declared. Tracing every LLM call through the
-Langfuse SDK (a trace per agent execution, spans per provider call with token
-usage from `TokenUsage`) is a later pass; it is deliberately not dropped into
-`app/agents/llm.py` in this phase so the offline provider surface stays free of
-network/SDK coupling.
+`ADAPTIVE_LANGFUSE_HOST` configure the tracing seam in `app/monitoring.langfuse`.
+It is **strictly gated**: without a public key (or without the `langfuse` SDK,
+which ships in the `monitoring` extra) every entry point is a no-op and the
+offline/mock provider surface never touches the SDK or the network.
+
+Two seams:
+
+- **Per-call spans** — `build_llm_provider` wraps the production resilient
+  provider in `TracedLLMProvider` (`llm_call` span with model, prompt/
+  completion tokens, cost, latency, success/error). The `mock` provider path is
+  never wrapped.
+- **Per-execution traces** — `run_agent` opens an `agent_execution` trace
+  (tags: agent key + review id), so every agent execution is one trace whether
+  it runs in-process or through the Celery fan-out task.
+
+Because tracing is gated, unit tests (which use mock providers and no keys) are
+byte-for-byte equivalent with and without the SDK installed.

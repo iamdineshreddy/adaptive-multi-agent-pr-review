@@ -21,6 +21,9 @@ async def run_agent(
     provider: LLMProvider | None = None,
 ) -> AgentResult:
     """Run one agent over a scope, returning structured findings + accounting."""
+    from app.monitoring.langfuse import execution_trace
+
     llm = provider or build_llm_provider(get_settings())
     agent: BaseReviewAgent = get_agent(agent_key, llm)
-    return await agent.run(scope)
+    async with execution_trace(agent_key, review_id=str(scope.review_id)) as _trace:
+        return await agent.run(scope)

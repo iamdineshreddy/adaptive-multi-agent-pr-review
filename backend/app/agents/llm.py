@@ -476,11 +476,24 @@ def build_llm_provider(settings: Settings) -> LLMProvider:
             "'openai', 'anthropic', or 'mock'"
         )
 
-    return ResilientLLMProvider(
-        primary,
-        fallback=fallback,
-        max_retries=settings.llm_max_retries,
+    return _traced(
+        ResilientLLMProvider(
+            primary,
+            fallback=fallback,
+            max_retries=settings.llm_max_retries,
+        )
     )
+
+
+def _traced(provider: LLMProvider) -> LLMProvider:
+    """Decorate with Langfuse span tracing when configured (Phase 14 part 2).
+
+    Kept as a lazy local import so importing ``app.agents.llm`` never touches
+    the monitoring stack; the offline/mock path stays free of SDK coupling.
+    """
+    from app.monitoring.langfuse import maybe_wrap_provider
+
+    return maybe_wrap_provider(provider)
 
 
 def _claude_default_model(settings: Settings) -> str:
