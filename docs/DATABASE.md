@@ -44,6 +44,7 @@ repositories ──────┤
                    ▼
         repository_memory ───┬── coding_standards
                              └── agent_metrics · system_metrics
+repositories ──► admin_audit_log     (append-only admin write trail, §3.18)
 ```
 
 ---
@@ -344,13 +345,37 @@ table backs the dashboard/alerting.
 
 Index: `review_id`.
 
+### 3.18 `admin_audit_log`
+
+Append-only audit trail for admin write actions (FR-7.3, docs/SECURITY.md §12:
+rerun + repository-settings writes plus any future admin writes). One row per
+mutation, written in the same request as the change.
+| column | type | notes |
+| --- | --- | --- |
+| id | uuid PK | auto-generated |
+| action | text | e.g. `review.rerun`, `repository.settings.update` |
+| target_kind | text | polymorphic target type (`review` / `repository`) |
+| target_id | uuid | polymorphic target id |
+| repository_id | uuid FK `repositories.id` null | for repo-scoped reads (isolation) |
+| principal_token_hash | text | SHA-256 digest — never the token |
+| principal_role | text | `viewer`/`operator`/`admin` |
+| principal_label | text | human label |
+| before | jsonb | state before the mutation |
+| after | jsonb | state after the mutation |
+| created_at | timestamptz | |
+
+Indexes: `created_at` (newest-first reads — exact ties are resolved by python-side
+`id` tiebreak mirroring the SQL ordering contract), `action`, `repository_id`
+(scoped-admin filtering).
+
 ---
 
 ## 4. Index plan summary
 
 - Hot paths: review-by-status, findings-by-review, feedback-by-(repo,outcome), RAG by
   repository + vector, last iteration per review.
-- Functional indexes: `(repository_id, created_at desc)` on feedback for decay scans.
+- Functional indexes: `(repository_id, created_at desc)` on feedback for decay scans;
+  `created_at` + `action` + `repository_id` on `admin_audit_log` for admin reads.
 - `pgvector` HNSW index; fallback exact cosine index while small.
 
 ---

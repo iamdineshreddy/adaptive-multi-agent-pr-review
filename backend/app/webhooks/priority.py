@@ -66,6 +66,24 @@ def risk_class_for(score: float, settings: Settings) -> RiskClass:
     return RiskClass.HIGH
 
 
+def assemble_score(factors: PriorityFactors, settings: Settings) -> float:
+    """Apply the documented weight vector to a factor bundle (QUEUE.md §2).
+
+    Kept as a single shared helper so ingestion and the Phase 15 part 2b rerun
+    path recompute identical scores from the same weights (no drift between the
+    live-event and stored-PR-state codepaths).
+    """
+    raw = (
+        settings.priority_w_security * factors.security_risk
+        + settings.priority_w_impact * factors.change_impact
+        + settings.priority_w_history * factors.historical_risk
+        + settings.priority_w_component * factors.component_criticality
+        + settings.priority_w_dependency * factors.dependency_risk
+        + settings.priority_w_urgency * factors.repo_priority
+    )
+    return round(settings.priority_scale * raw, 3)
+
+
 def compute_priority(
     pr: GitHubPullRequest,
     settings: Settings,
@@ -80,17 +98,9 @@ def compute_priority(
         dependency_risk=_UNREACHABLE_FACTOR,
         repo_priority=repo_priority(repo_urgency),
     )
-    raw = (
-        settings.priority_w_security * factors.security_risk
-        + settings.priority_w_impact * factors.change_impact
-        + settings.priority_w_history * factors.historical_risk
-        + settings.priority_w_component * factors.component_criticality
-        + settings.priority_w_dependency * factors.dependency_risk
-        + settings.priority_w_urgency * factors.repo_priority
-    )
-    score = settings.priority_scale * raw
+    score = assemble_score(factors, settings)
     return PriorityResult(
-        score=round(score, 3),
+        score=score,
         risk_class=risk_class_for(score, settings),
         factors=factors,
     )

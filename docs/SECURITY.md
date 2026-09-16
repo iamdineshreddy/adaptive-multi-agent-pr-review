@@ -87,10 +87,45 @@ doc pins the requirements now.
 - `GET /api/v1/repositories` (list) now honours the caller's scope: scoped
   principals only see their own repositories; detail/memory/feedback endpoints
   return 403 out of scope (as in part 1). Admin write actions and the audit
-  trail for them ship with the FR-7.3 rerun/repository-settings routes (see
-  docs/ROADMAP.md Phase 15 split note) rather than being fabricated against an
-  endpoint surface that does not yet exist.
+  trail for them landed in part 2b with the FR-7.3 rerun/repository-settings
+  routes that exercise them (see `docs/SECURITY.md` §12 below) — nothing was
+  fabricated against an endpoint surface that did not exist.
 - Request body-size cap: `ADAPTIVE_MAX_REQUEST_BODY_BYTES` (default 1 MiB) is
   enforced by `app/middleware/body_limit.py` before routing (413
   `body_too_large`), guarding the public write endpoints (webhook + feedback)
   against oversized permutation payloads.
+
+## 12. Implementation appendix (Phase 15, part 2b — admin write actions + audit trail, FR-7.3)
+
+- `app/api/admin.py` (mounted at `/api/v1`, router-level `get_principal` gate)
+  exposes exactly the FR-7.3 admin write surface plus its audit trail — nothing
+  is registered before it exists:
+  - `POST /api/v1/reviews/{review_id}/rerun` — `require_role("operator")`; source
+    review resolved **server-side** and checked with `require_repo_access` before
+    any write; creates a new `Review` (`mode=MANUAL_RERUN`, `status=QUEUED`) and
+    dispatches it via the config-backed `ReviewDispatcher` (`celery` provider, or
+    the log-only fallback) → `202` with the new run's tracking payload.
+  - `PATCH /api/v1/repositories/{repository_id}/settings` —
+    `require_role("operator")` + repo scope; validated merge (urgency, budget,
+    gates, ARUM weights, decay) into `Repository.review_settings`. Weight
+    overrides are validated through the real ARUM override grammar
+    (`ArumWeights.with_overrides`) → `422 invalid_settings` on unknown keys, so a
+    typo can never silently change policy. Partial updates merge key-wise.
+  - `GET /api/v1/audit-log` — `require_role("admin")`; newest-first, `action`
+    filter + pagination; a scoped admin token sees only its own repositories'
+    rows (the store filters on `repository_id IN scope`).
+- Audit trail (`app/models/audit.py`, `admin_audit_log`, migration `0007`):
+  append-only rows per write — `action`, polymorphic `target_kind`/`target_id`,
+  FK'd `repository_id`, the acting principal's **SHA-256 token digest** (never
+  the token), role and label, `before`/`after` JSON state, `created_at`. Rows are
+  written in the same request as the mutation so an unrecorded admin action is
+  impossible, and reads are admin-only. Future admin writes append under the same
+  contract rather than multiplying ad-hoc audit columns.
+- Stored settings are honest inputs, not dead config: the orchestrator decision
+  layer consumes the per-repo budget caps / safety gates / ARUM weight overrides
+  (`_decide_findings`) and per-repo memory decay (`_refresh_repository_memory`),
+  each falling back to the global default when unset.
+- The authn/authz matrix from parts 1–2 is extended and covered by tests
+  (viewer 403, below-minimum role 403, out-of-scope 403, unauthenticated 401,
+  scoped-admin audit filtering) in `tests/test_api_admin.py` (21 tests);
+  512 tests pass with the whole suite (11 live-service self-skip).

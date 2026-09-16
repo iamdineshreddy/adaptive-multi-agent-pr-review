@@ -220,3 +220,25 @@ def test_findings_carry_decision_features() -> None:
         "temporal_weight",
     ):
         assert column_name in findings.c, column_name
+
+
+def test_admin_audit_log_schema_matches_docs() -> None:
+    audit = _table("admin_audit_log")
+    for column_name in (
+        "id",
+        "action",
+        "target_kind",
+        "target_id",
+        "repository_id",
+        "principal_token_hash",
+        "principal_role",
+        "principal_label",
+        "before",
+        "after",
+        "created_at",
+    ):
+        assert column_name in audit.c, column_name
+    indexes = {tuple(idx.columns.keys()) for idx in audit.indexes}
+    assert ("created_at",) in indexes
+    assert ("action",) in indexes
+    assert ("repository_id",) in indexes

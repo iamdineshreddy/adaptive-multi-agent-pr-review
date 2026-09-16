@@ -61,8 +61,19 @@ Per-iteration summary (changed files, agents invoked, tokens, latency, published
 
 ### `POST /api/v1/reviews/{review_id}/rerun`
 
-Manually re-enqueues the review (re-runs the full state machine). Requires
-`operator` role. Returns `202` + new run tracking.
+Implemented (Phase 15 part 2b, FR-7.3). Requires `operator` role. Creates a fresh
+`Review` (`mode=MANUAL_RERUN`, `status=QUEUED`) for the same pull request with the
+priority recomputed from stored PR state + repository urgency (shared scoring
+family with the webhook path, `docs/QUEUE.md` §2), then hands it to the queue
+dispatcher (`celery` provider or log-only fallback).
+
+Responses:
+- `202 Accepted` → `{ "review_id": "<new run>", "mode": "MANUAL_RERUN", "status": "QUEUED", "priority_score": 1.3, "risk_class": "MEDIUM", "pr_number": 42, "dispatch_note": "enqueued queue.enqueue_review" }`
+- `401` → `missing_bearer_token` / `invalid_token`
+- `403` → `insufficient_permission` (below `operator`) / `repository_out_of_scope` (scoped token)
+- `404` → `review_not_found`
+
+Every rerun appends an admin-audit row (`review.rerun`); see `GET /api/v1/audit-log`.
 
 ---
 
@@ -79,8 +90,50 @@ component activity, strictness, active ARUM weight overrides, decay parameters.
 
 ### `PATCH /api/v1/repositories/{repository_id}/settings`
 
-Update review settings (budget caps, safety gates, weights, decay). Audited
-(`operator` role).
+Implemented (Phase 15 part 2b, FR-7.3). Requires `operator` role. Partially
+updates `Repository.review_settings` (at least one field required). Field groups:
+
+- `urgency` — float 0..1 (priority weight for this repository)
+- `review_budget` — `{ low, medium, high }` ints ≥ 1 (per-risk-class ARUM budget caps)
+- `safety_gates` — `{ high_confidence, low_confidence, high_redundancy }` floats 0..1
+- `arum_weights` — `{ "w1_severity": 0.5, … }` overrides validated through the real
+  ARUM override grammar (unknown weight keys → `422 invalid_settings`)
+- `decay` — `{ temporal_decay_days, decay_lambda }` (memory decay for this repository)
+
+Nested groups merge key-wise (a partial `review_budget`/`arum_weights` never
+clobbers siblings); the merged result replaces `review_settings` on the repository
+and is actively consumed by the orchestrator decision layer (`_decide_findings`
+budget/gates/weights, `_refresh_repository_memory` decay — falling back to the
+global config when unset).
+
+Responses:
+- `200` → `{ "repository_id": "…", "review_settings": { "urgency": 0.9, … } }`
+- `401` → `missing_bearer_token` / `invalid_token`
+- `403` → `insufficient_permission` (below `operator`) / `repository_out_of_scope`
+- `404` → `repository_not_found`
+- `422` → `invalid_settings` (unknown weight key) or schema rejection (empty body, out-of-range fields)
+
+Every update appends an admin-audit row (`repository.settings.update`) carrying the
+acting principal + before/after settings; see `GET /api/v1/audit-log`.
+
+---
+
+### `GET /api/v1/audit-log`
+
+Implemented (Phase 15 part 2b, FR-7.3). Requires `admin` role. Append-only admin
+audit trail, newest first.
+
+Query parameters: `action` (exact action filter), `limit` (1–200, default 50),
+`offset` (default 0). Scoped admin tokens only ever see rows for repositories
+inside their scope.
+
+Responses:
+- `200` → `[ { "id": 7, "action": "repository.settings.update", "target_kind": "repository", "target_id": "…", "repository_id": "…", "principal_token_hash": "<sha256>", "principal_role": "operator", "principal_label": "ops", "before": {…}, "after": {…}, "created_at": "…" }, … ]`
+- `401` → `missing_bearer_token` / `invalid_token`
+- `403` → `insufficient_permission` (requires `admin`)
+
+Actions recorded: `review.rerun`, `repository.settings.update` (future admin write
+actions append under the same contract — `docs/SECURITY.md` §12).
 
 ---
 

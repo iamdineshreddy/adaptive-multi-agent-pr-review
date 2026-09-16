@@ -164,13 +164,16 @@ async def _refresh_repository_memory(
     from app.adaptive.memory import build_memory_snapshot
 
     settings = get_settings()
-    tau = settings.arum_temporal_decay_days
+    repo = await store.repository_review_settings(repository_id)
+    decay = (repo or {}).get("decay") or {}
+    tau = int(decay.get("temporal_decay_days", settings.arum_temporal_decay_days))
+    lam = float(decay.get("decay_lambda", settings.arum_decay_lambda))
     events = await store.repository_feedback_events(
         repository_id, max_age_days=3.0 * tau
     )
     if not events:
         return None
-    built = build_memory_snapshot(events, tau_days=tau, lam=settings.arum_decay_lambda)
+    built = build_memory_snapshot(events, tau_days=tau, lam=lam)
     return await store.upsert_repository_memory(
         repository_id, built, decay_params=built["decay_params"]
     )

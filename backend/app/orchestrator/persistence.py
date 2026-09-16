@@ -23,11 +23,12 @@ from app.adaptive.feedback import FeedbackWrite, feedback_identity
 from app.adaptive.memory import FeedbackEvent
 from app.adaptive.rag import EmbeddingRow, RagHit, top_k_similar
 from app.adaptive.scoring import Decision
-from app.config.settings import get_settings
+from app.config.settings import Settings, get_settings
 from app.consolidation.datatypes import EmbeddingWrite, FindingGroupWrite, FindingWrite
 from app.consolidation.similarity import vector_sql_literal
 from app.database import SessionFactory
 from app.models import (
+    AdminAuditLog,
     Agent,
     AgentMetric,
     CodingStandard,
@@ -45,6 +46,7 @@ from app.models import (
 from app.models.enums import (
     FeedbackOutcome,
     FindingStatus,
+    ReviewMode,
     ReviewStatus,
     RiskClass,
     Severity,
@@ -69,8 +71,65 @@ class TaskWrite:
     completed_at: datetime | None = None
 
 
+@dataclass(frozen=True)
+class AdminAuditWrite:
+    """An admin write action to append to the audit trail (SECURITY.md §12).
+
+    Carries the acting principal (digest only, never plaintext) and the
+    before/after state so the change is reproducible without re-deriving it.
+    ``repository_id`` is denormalised for scope filtering of audit reads.
+    """
+
+    action: str
+    target_kind: str
+    target_id: str
+    repository_id: str | None = None
+    principal_token_hash: str = ""
+    principal_role: str = ""
+    principal_label: str = ""
+    before: dict[str, Any] | None = None
+    after: dict[str, Any] | None = None
+
+
 def utc_now() -> datetime:
     return datetime.now(UTC)
+
+
+def _rerun_priority(
+    *,
+    changed_files: int,
+    additions: int,
+    deletions: int,
+    urgency: float | None,
+    settings: Settings,
+) -> tuple[float, RiskClass]:
+    """Recompute ingestion priority for a stored PR (Phase 15 part 2b).
+
+    Mirrors the live-event factor baselines from QUEUE.md §2: factors whose
+    inputs the stored PR row does not retain (file paths, history, dependency
+    graph) stay at their documented 0.0 baseline while change impact and
+    repository urgency are recomputed from retained state. Scores come from the
+    same ``assemble_score`` as the webhook, so a rerun competes fairly in the
+    same priority zset.
+    """
+    from app.webhooks.priority import (
+        PriorityFactors,
+        assemble_score,
+        change_impact,
+        repo_priority,
+        risk_class_for,
+    )
+
+    factors = PriorityFactors(
+        security_risk=0.0,
+        change_impact=change_impact(changed_files, additions, deletions),
+        historical_risk=0.0,
+        component_criticality=0.0,
+        dependency_risk=0.0,
+        repo_priority=repo_priority(urgency),
+    )
+    score = assemble_score(factors, settings)
+    return score, risk_class_for(score, settings)
 
 
 def _review_summary_dict(
@@ -377,6 +436,47 @@ class OrchestratorStore(Protocol):
     async def metrics_rollup(self) -> dict[str, Any]:
         """Dashboard metrics: queue depths, findings, feedback, agent rollups."""
 
+    # --- Phase 15 part 2b: admin write actions + audit trail (FR-7.3) --------
+    async def review_repository(self, review_id: object) -> str | None:
+        """Repository id a review belongs to (for scope checks before writes)."""
+
+    async def create_rerun_review(
+        self, review_id: object, *, delivery_id: str
+    ) -> dict[str, Any] | None:
+        """Create a fresh ``MANUAL_RERUN`` review run for the same PR.
+
+        Recomputes priority from the stored PR state + repo urgency, stages the
+        run as ``QUEUED``, and returns its tracking payload (None when the
+        original review does not exist).
+        """
+
+    async def patch_repository_settings(
+        self, repository_id: object, settings: dict[str, Any]
+    ) -> dict[str, Any] | None:
+        """Replace ``Repository.review_settings`` and return the new value."""
+
+    async def repository_review_settings(
+        self, repository_id: object
+    ) -> dict[str, Any] | None:
+        """The repository's review settings (or None when no repo exists)."""
+
+    async def record_audit(self, entry: AdminAuditWrite) -> None:
+        """Append an admin write action to the audit trail."""
+
+    async def audit_log(
+        self,
+        *,
+        limit: int,
+        offset: int,
+        action: str | None = None,
+        repository_ids: Sequence[str] | None = None,
+    ) -> list[dict[str, Any]]:
+        """Newest-first admin audit rows, optionally filtered by action.
+
+        ``repository_ids`` restricts the trail to the given repositories when a
+        scoped admin token is used (docs/SECURITY.md §5 isolation discipline).
+        """
+
 
 class MemoryOrchestratorStore:
     """In-process, deterministic store for unit tests and local debugging."""
@@ -394,6 +494,8 @@ class MemoryOrchestratorStore:
         self.standards: dict[str, list[dict[str, Any]]] = {}
         self.iterations: list[dict[str, Any]] = []
         self.repositories: dict[str, dict[str, Any]] = {}
+        self.audit: list[dict[str, Any]] = []
+        self._audit_seq = 0
 
     async def transition(
         self,
@@ -936,6 +1038,119 @@ class MemoryOrchestratorStore:
                 "latency_max_ms": max(latencies) if latencies else 0,
             },
         }
+
+    # --- Phase 15 part 2b: admin write actions + audit trail (FR-7.3) --------
+    async def review_repository(self, review_id: object) -> str | None:
+        record = self.reviews.get(str(review_id))
+        if record is None:
+            return None
+        repository_id = record.get("repository_id")
+        return str(repository_id) if repository_id is not None else None
+
+    async def create_rerun_review(
+        self, review_id: object, *, delivery_id: str
+    ) -> dict[str, Any] | None:
+        rid = str(review_id)
+        record = self.reviews.get(rid)
+        if record is None:
+            return None
+        pr = record.get("pull_request") or {}
+        repo_id = record.get("repository_id")
+        urgency = None
+        if repo_id is not None:
+            repo = self.repositories.get(str(repo_id))
+            if repo is not None:
+                urgency = (repo.get("review_settings") or {}).get("urgency")
+        score, risk = _rerun_priority(
+            changed_files=int(pr.get("changed_files") or 0),
+            additions=int(pr.get("additions") or 0),
+            deletions=int(pr.get("deletions") or 0),
+            urgency=urgency,
+            settings=get_settings(),
+        )
+        new_id = str(uuid.uuid4())
+        self.reviews[new_id] = {
+            "status": ReviewStatus.QUEUED.value,
+            "mode": ReviewMode.MANUAL_RERUN.value,
+            "priority_score": score,
+            "risk_class": risk.value,
+            "repository_id": None if repo_id is None else str(repo_id),
+            "supervisor_notes": [],
+            "status_history": [],
+            "github_delivery_id": delivery_id,
+        }
+        return {
+            "review_id": new_id,
+            "repository_id": None if repo_id is None else str(repo_id),
+            "pr_number": int(pr.get("number") or 0),
+            "priority_score": score,
+            "risk_class": risk.value,
+            "mode": ReviewMode.MANUAL_RERUN.value,
+        }
+
+    async def patch_repository_settings(
+        self, repository_id: object, settings: dict[str, Any]
+    ) -> dict[str, Any] | None:
+        repo = self.repositories.get(str(repository_id))
+        if repo is None:
+            return None
+        merged = dict(settings)
+        repo["review_settings"] = merged
+        return merged
+
+    async def repository_review_settings(
+        self, repository_id: object
+    ) -> dict[str, Any] | None:
+        repo = self.repositories.get(str(repository_id))
+        if repo is None:
+            return None
+        settings = repo.get("review_settings")
+        return dict(settings) if isinstance(settings, dict) else None
+
+    async def record_audit(self, entry: AdminAuditWrite) -> None:
+        self._audit_seq += 1
+        self.audit.append(
+            {
+                # monotonic so ordering contract matches SQL (created_at, id↘)
+                "id": self._audit_seq,
+                "action": entry.action,
+                "target_kind": entry.target_kind,
+                "target_id": entry.target_id,
+                "repository_id": entry.repository_id,
+                "principal_token_hash": entry.principal_token_hash,
+                "principal_role": entry.principal_role,
+                "principal_label": entry.principal_label,
+                "before": dict(entry.before) if entry.before else None,
+                "after": dict(entry.after) if entry.after else None,
+                "created_at": utc_now().isoformat(),
+            }
+        )
+
+    async def audit_log(
+        self,
+        *,
+        limit: int,
+        offset: int,
+        action: str | None = None,
+        repository_ids: Sequence[str] | None = None,
+    ) -> list[dict[str, Any]]:
+        rows = [
+            dict(row)
+            for row in self.audit
+            if (action is None or row.get("action") == action)
+            and (
+                repository_ids is None
+                or str(row.get("repository_id") or "") in set(repository_ids)
+            )
+        ]
+        rows.sort(
+            key=lambda row: (
+                str(row.get("created_at") or ""),
+                row.get("id") or 0,
+            ),
+            reverse=True,
+        )
+        return list(rows[offset : offset + limit])
 
 
 class SqlOrchestratorStore:
@@ -1755,6 +1970,132 @@ class SqlOrchestratorStore:
                 "latency_max_ms": int(max_latency or 0),
             },
         }
+
+    # --- Phase 15 part 2b: admin write actions + audit trail (FR-7.3) --------
+    async def review_repository(self, review_id: object) -> str | None:
+        rid = uuid.UUID(str(review_id))
+        async with self._session_factory() as session:
+            review = await session.get(Review, rid)
+            return str(review.repository_id) if review is not None else None
+
+    async def create_rerun_review(
+        self, review_id: object, *, delivery_id: str
+    ) -> dict[str, Any] | None:
+        rid = uuid.UUID(str(review_id))
+        async with self._session_factory() as session, session.begin():
+            review = await session.get(Review, rid)
+            if review is None:
+                return None
+            pr = await session.get(PullRequest, review.pull_request_id)
+            repo = await session.get(Repository, review.repository_id)
+            if pr is None or repo is None:
+                return None
+            score, risk = _rerun_priority(
+                changed_files=pr.changed_files,
+                additions=pr.additions,
+                deletions=pr.deletions,
+                urgency=(repo.review_settings or {}).get("urgency"),
+                settings=self._settings,
+            )
+            rerun = Review(
+                pull_request_id=pr.id,
+                repository_id=repo.id,
+                status=ReviewStatus.QUEUED,
+                mode=ReviewMode.MANUAL_RERUN,
+                priority_score=score,
+                risk_class=risk,
+                github_delivery_id=delivery_id,
+            )
+            session.add(rerun)
+            await session.flush()
+            return {
+                "review_id": str(rerun.id),
+                "repository_id": str(repo.id),
+                "pr_number": pr.number,
+                "priority_score": score,
+                "risk_class": risk.value,
+                "mode": ReviewMode.MANUAL_RERUN.value,
+            }
+
+    async def patch_repository_settings(
+        self, repository_id: object, settings: dict[str, Any]
+    ) -> dict[str, Any] | None:
+        rid = uuid.UUID(str(repository_id))
+        async with self._session_factory() as session, session.begin():
+            repo = await session.get(Repository, rid)
+            if repo is None:
+                return None
+            repo.review_settings = dict(settings)
+            return dict(settings)
+
+    async def repository_review_settings(
+        self, repository_id: object
+    ) -> dict[str, Any] | None:
+        rid = uuid.UUID(str(repository_id))
+        async with self._session_factory() as session:
+            repo = await session.get(Repository, rid)
+            if repo is None:
+                return None
+            return dict(repo.review_settings or {})
+
+    async def record_audit(self, entry: AdminAuditWrite) -> None:
+        async with self._session_factory() as session, session.begin():
+            session.add(
+                AdminAuditLog(
+                    action=entry.action,
+                    target_kind=entry.target_kind,
+                    target_id=uuid.UUID(entry.target_id),
+                    repository_id=(
+                        uuid.UUID(entry.repository_id)
+                        if entry.repository_id is not None
+                        else None
+                    ),
+                    principal_token_hash=entry.principal_token_hash,
+                    principal_role=entry.principal_role,
+                    principal_label=entry.principal_label,
+                    before=dict(entry.before) if entry.before else None,
+                    after=dict(entry.after) if entry.after else None,
+                )
+            )
+
+    async def audit_log(
+        self,
+        *,
+        limit: int,
+        offset: int,
+        action: str | None = None,
+        repository_ids: Sequence[str] | None = None,
+    ) -> list[dict[str, Any]]:
+        statement = select(AdminAuditLog).order_by(
+            AdminAuditLog.created_at.desc(), AdminAuditLog.id
+        )
+        if action is not None:
+            statement = statement.where(AdminAuditLog.action == action)
+        if repository_ids is not None:
+            statement = statement.where(
+                AdminAuditLog.repository_id.in_(set(repository_ids))
+            )
+        statement = statement.offset(offset).limit(limit)
+        async with self._session_factory() as session:
+            rows = (await session.execute(statement)).scalars()
+            return [
+                {
+                    "id": str(row.id),
+                    "action": row.action,
+                    "target_kind": row.target_kind,
+                    "target_id": str(row.target_id),
+                    "repository_id": (
+                        str(row.repository_id) if row.repository_id else None
+                    ),
+                    "principal_token_hash": row.principal_token_hash,
+                    "principal_role": row.principal_role,
+                    "principal_label": row.principal_label,
+                    "before": dict(row.before) if row.before else None,
+                    "after": dict(row.after) if row.after else None,
+                    "created_at": _to_iso(row.created_at),
+                }
+                for row in rows
+            ]
 
     @staticmethod
     def _int(value: object) -> int:

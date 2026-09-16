@@ -100,7 +100,7 @@ Full details: `docs/ARCHITECTURE.md`.
 - Targeted iterative review across PR updates (resolved / stale / keep)
 - Agent disagreement handling
 - FastAPI + SQLAlchemy + asyncpg + Alembic
-- Bearer-token auth/authz on the dashboard surface (Phase 15)
+- Bearer-token auth/authz, admin write actions + audit trail (Phase 15)
 - Langfuse / Prometheus / Grafana observability (+ a worker-scrape exporter)
 - React + TypeScript + Tailwind dashboard
 - Docker Compose deployment (api / worker / scheduler / redis / postgres /
@@ -122,7 +122,7 @@ pip install -e ".[dev,all]"
 cp ../.env.example .env
 alembic upgrade head                # needs PostgreSQL
 uvicorn app.main:app --reload       # http://localhost:8000/api/docs
-pytest -q                           # 490 passed / 11 skipped (no infra)
+pytest -q                           # 512 passed / 11 skipped (no infra)
 ```
 
 Full stack (needs a Docker host):
@@ -142,7 +142,7 @@ backend/
         adaptive/       ARUM: features, weights, scoring, selection gates,
                         decay, RAG, feedback, learning
         agents/         Five review agents, prompts, LLM provider, diff tooling
-        api/            FastAPI routes (dashboard, feedback, monitoring)
+        api/            FastAPI routes (dashboard, feedback, admin, monitoring)
         consolidation/  Cross-agent redundancy grouping (embeddings + proximity)
         experiments/    Selection-layer experiment harness (modes, metrics, runner)
         github/         Webhook verification + GitHub REST client / scope building
@@ -155,7 +155,7 @@ backend/
         database/       Async engine, session factory
         config/         pydantic-settings configuration
         monitoring/     Prometheus, Langfuse, structured logging
-    tests/              490 tests (unit + gated live-service lanes)
+    tests/              512 tests (unit + gated live-service lanes)
     alembic/            Schema migrations
 frontend/               React + TypeScript + Tailwind dashboard (Vite)
 infra/

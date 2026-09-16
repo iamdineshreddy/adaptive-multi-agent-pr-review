@@ -460,8 +460,16 @@ async def _decide_findings(
     happened.
     """
     try:
-        weights = load_weights(version=ctx.settings.arum_weights_version)
         repository_id = summary.findings[0].repository_id if summary.findings else None
+        repo_settings = (
+            await ctx.store.repository_review_settings(repository_id)
+            if repository_id is not None
+            else None
+        )
+        weights = load_weights(
+            version=ctx.settings.arum_weights_version,
+            repo_overrides=(repo_settings or {}).get("arum_weights") or None,
+        )
         snapshot = (
             await _refresh_repository_memory(ctx, repository_id)
             if repository_id
@@ -476,13 +484,24 @@ async def _decide_findings(
         decisions = _score_candidates(review_id, summary, weights, memories)
         ranked = rank_decisions(decisions)
         risk_class = await ctx.store.review_risk_class(review_id)
-        cap = _budget_cap(risk_class, ctx.settings)
+        cap = _budget_cap(
+            risk_class,
+            ctx.settings,
+            repo_budget=(repo_settings or {}).get("review_budget"),
+        )
+        gates = (repo_settings or {}).get("safety_gates") or {}
         selection = select_decisions(
             ranked,
             cap=cap,
-            high_confidence=ctx.settings.arum_gate_high_confidence,
-            low_confidence=ctx.settings.arum_gate_low_confidence,
-            high_redundancy=ctx.settings.arum_gate_high_redundancy,
+            high_confidence=_repo_float(
+                gates, "high_confidence", ctx.settings.arum_gate_high_confidence
+            ),
+            low_confidence=_repo_float(
+                gates, "low_confidence", ctx.settings.arum_gate_low_confidence
+            ),
+            high_redundancy=_repo_float(
+                gates, "high_redundancy", ctx.settings.arum_gate_high_redundancy
+            ),
         )
         trace = ctx.trace or MemoryDecisionTrace()
         for decision in selection.decisions:
@@ -517,19 +536,62 @@ async def _decide_findings(
                 "and RAG relevance scored as 0.0 (cold start); the memory "
                 "worker rebuilds from developer feedback."
             )
+        if repo_settings:
+            note += (
+                " repository-specific settings applied "
+                "(review_budget/safety_gates/arum_weights)."
+            )
         await ctx.store.append_note(review_id, note)
         return None, selection.selected_count
     except Exception as exc:  # noqa: BLE001 - any decision failure must surface
         return f"ARUM decision failed: {exc}", 0
 
 
-def _budget_cap(risk_class: RiskClass | None, cfg: Settings) -> int:
-    """Resolve the per-review budget cap from the PR risk class (ARUM.md §7)."""
+def _budget_cap(
+    risk_class: RiskClass | None,
+    cfg: Settings,
+    repo_budget: dict[str, Any] | None = None,
+) -> int:
+    """Resolve the per-review budget cap (ARUM.md §7).
+
+    A repository ``review_budget`` override (``{low, medium, high}`` ints from
+    the Phase 15 part 2b settings endpoint) wins per risk class; missing/absent
+    values fall back to the global caps so a partially configured override never
+    lowers a review below its documented floor.
+    """
+    repo = repo_budget if isinstance(repo_budget, dict) else None
+    if repo is not None:
+        low = repo.get("low")
+        if isinstance(low, int) and risk_class == RiskClass.LOW:
+            return low
+        medium = repo.get("medium")
+        if isinstance(medium, int) and risk_class == RiskClass.MEDIUM:
+            return medium
+        high = repo.get("high")
+        if isinstance(high, int):
+            return high
     if risk_class == RiskClass.LOW:
         return cfg.review_budget_low
     if risk_class == RiskClass.MEDIUM:
         return cfg.review_budget_medium
     return cfg.review_budget_high  # HIGH, and unknown/missing -> most permissive
+
+
+def _repo_float(settings: dict[str, Any], key: str, default: float) -> float:
+    """Read a possibly-malformed repo settings value defensively.
+
+    Settings are validated at the Phase 15 part 2b write endpoint, but the JSON
+    values are advisory runtime data (could be edited out-of-band); a non-numeric
+    override must never crash the decision layer, so it falls back to the global
+    default rather than being trusted.
+    """
+    value = settings.get(key, default)
+    if isinstance(value, (int, float, str)):
+        try:
+            return float(value)
+        except (TypeError, ValueError):
+            return default
+    return default
 
 
 async def _refresh_repository_memory(
