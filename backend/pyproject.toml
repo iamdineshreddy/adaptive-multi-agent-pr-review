@@ -51,6 +51,9 @@ monitoring = [
     "prometheus-client>=0.21",
     "langfuse>=2.30",
 ]
+plots = [
+    "matplotlib>=3.8,<4",
+]
 all = ["adaptive-review[db,llm,queue,ml,monitoring,orchestration]"]
 
 [project.scripts]

@@ -23,7 +23,7 @@ pass.
 | 14 | Observability: Langfuse traces, Prometheus metrics, Grafana dashboards, structured logs | **done** (structured logs + Prometheus metrics + Grafana provisioning + Langfuse tracing; see split note below) |
 | 15 | Security hardening: auth, authz, rate limiting, injection defences, secret handling, audit | **done** (bearer-token authn/authz, feedback gating + list scoping, body cap, admin write actions + audit trail, see split notes below) |
 | 16 | Testing: unit, integration, API, queue, agent, DB, RAG, adaptive, webhook; failure scenarios | **part 1 done + part 2 authored** (worker-crash/restarted-in-flight live suite authored; exec pending Phase 18 stack — see split note below) |
-| 17 | Experiments: dataset (`github-codereview`) preprocessing, baselines, ablation, results, plots | **part 1 done** (see split note below) |
+| 17 | Experiments: dataset (`github-codereview`) preprocessing, baselines, ablation, results, plots | **part 1 done + part 2 in progress** (plotting tooling authored + verification-only execution; dataset exec pending — see split note below) |
 | 18 | Deployment: docker-compose (api/worker/scheduler/redis/postgres/frontend/prometheus/grafana) | **part 1 done** (see split note below) |
 | 19 | Research documentation: ARCHITECTURE.md refinement, RESEARCH.md, EXPERIMENTS.md, final README | **done** (ARCHITECTURE.md aligned to the implemented system incl. the honest no-false-publication checkpoint; RESEARCH.md fleshed out — research questions, cited related-work plan with verification rule, evaluation plan, limitations, ethics, paper scaffold; EXPERIMENTS.md dataset/licensing + related-work anchor; README.md refreshed — cleaned diagram, accurate layout/status, quickstart, integrity statement; all deferred parts remain explicitly pending — no invented numbers or publication claims) |
 
@@ -147,7 +147,7 @@ stays the system of record; restart recovery re-stages through the same ingest
 path (`stage_review_to_priority` + DB score loader) and the review is handed to
 fan-out exactly once — the no-duplicate-restart and priority-order-preserved
 across recovery follow-ups pin the contract. The suite self-skips without
-Postgres+Redis exactly like its siblings (512 passed / 14 skipped locally).
+Postgres+Redis exactly like its siblings (520 passed / 14 skipped locally).
 **Execution of the scenarios (and the broker-transport integration run) is
 pending the Phase 18 Compose stack — no executed result is claimed until then
 (README integrity rule).**
@@ -164,10 +164,16 @@ A1..A6 baselines/ablations as declarative mode switches executed through the
 pipeline), CSV/JSON results and the ablation-vs-B5 delta table, and the
 end-to-end runner tests (`tests/test_experiments_*.py`; 39 new tests, 485 total
 pass). Results on the bundled smoke corpus are explicitly flagged as
-verification-only, never research numbers. **Part 2** (next): `github-codereview`
-ingestion under a documented license review, an executed run of the full table
-on the real corpus, literature comparison for §2 baselines, and matplotlib
-plots/analysis notebooks. Until part 2 runs, every results table remains
+verification-only, never research numbers. **Part 2** (in progress): the
+plotting tooling is authored and executed verification-only — the `plots`
+extra (matplotlib via `backend/app/experiments/plots.py`) and the thin CLI
+`experiments/run/plot_summary.py` render `plot_metrics.png` +
+`plot_deltas_vs_b5.png` from the harness artifacts with a baked-in
+VERIFICATION-ONLY footnote (PNGs/CSVs gitignored; 8 new tests, 520 total
+pass). Remaining: `github-codereview` ingestion under a documented license
+review, an executed run of the full table on the real corpus, literature
+comparison for §2 baselines, and re-rendering the figures from that run.
+Until the real-corpus run lands, every results table remains
 "Results pending experimental validation".
 
 Phase 18 scope note (deliberate split): deployment assets are written and gated

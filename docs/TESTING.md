@@ -2,7 +2,7 @@
 
 Phase 16 organizes and hardens the repository suite. Coverage is measured per
 phase; the current baseline is **84% line coverage over `backend/app`
-(5121 statements, 841 uncovered)**, with the bulk of uncovered code in the
+(5243 statements, 830 uncovered)**, with the bulk of uncovered code in the
 PostgreSQL/Redis-backed Sql+Redis implementations and the LLM/orchestration
 paths that need a live database or provider and are exercised by the gated
 integration lane below (never by fakes).
@@ -22,7 +22,7 @@ integration lane below (never by fakes).
 ## Running the gate
 
 ```bash
-python -m pytest -q            # 512 passed / 14 skipped (10 live-DB, 1 pipeline, 3 crash-recovery)
+python -m pytest -q            # 520 passed / 14 skipped (10 live-DB, 1 pipeline, 3 crash-recovery)
 python -m ruff check .
 python -m ruff format --check .
 python -m mypy app

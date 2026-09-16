@@ -109,12 +109,23 @@ What the harness deliberately does **not** claim:
   come from the labelled corpus, so the harness measures the selection layer
   deterministically and offline.
 
-**Phase 17 part 2 (next):**
+**Phase 17 part 2 (in progress):**
 
-- `github-codereview` ingestion (license review + preprocessing of the real
-  corpus under `datasets/README.md`) and an executed run of the full table.
-- Literature comparison of the §2 baselines and the §1 label evidence (with
-  citations), plus matplotlib plots under `experiments/notebooks`.
+- Plotting tooling is **authored and executed (verification-only)**: the
+  `plots` extra (`backend/pyproject.toml`) brings in matplotlib
+  (`app/experiments/plots.py`), and the thin CLI
+  `experiments/run/plot_summary.py` renders `plot_metrics.png` +
+  `plot_deltas_vs_b5.png` next to the harness artifacts. Figures drawn from the
+  bundled smoke corpus carry an explicit **VERIFICATION-ONLY** footnote baked
+  into the image (honesty contract §6); the generated PNGs/CSVs are gitignored
+  (`experiments/results/*`, only `.gitkeep` tracked). The pure data layer
+  (`load_summary`/`render_figures`) is covered by `tests/test_experiments_plots.py`
+  (8 tests) and the renderer self-describes when the extra is missing.
+- Still pending: `github-codereview` ingestion (license review + preprocessing
+  of the real corpus under `datasets/README.md`) and an executed run of the
+  full table; literature comparison of the §2 baselines and the §1 label
+  evidence (with citations). The plots will be re-rendered from the real run
+  (without the verification footnote) once that passes.
 
 All numbers outside part 2 remain "Results pending experimental validation".
 

@@ -122,7 +122,7 @@ pip install -e ".[dev,all]"
 cp ../.env.example .env
 alembic upgrade head                # needs PostgreSQL
 uvicorn app.main:app --reload       # http://localhost:8000/api/docs
-pytest -q                           # 512 passed / 14 skipped (no infra)
+pytest -q                           # 520 passed / 14 skipped (no infra)
 ```
 
 Full stack (needs a Docker host):
@@ -155,7 +155,7 @@ backend/
         database/       Async engine, session factory
         config/         pydantic-settings configuration
         monitoring/     Prometheus, Langfuse, structured logging
-    tests/              526 tests (unit + gated live-service lanes)
+    tests/              534 tests (unit + gated live-service lanes)
     alembic/            Schema migrations
 frontend/               React + TypeScript + Tailwind dashboard (Vite)
 infra/
@@ -186,9 +186,12 @@ silently cut):
   broker-transport run need the Phase 18 stack.
 - **Phase 17 part 1** done: reproducible experiment harness (`app/experiments` +
   `experiments/`) with label pre-processing, B1–B5 + A1–A6 ablation modes over
-  the real `app.adaptive` machinery, and 39 harness tests. **Part 2** (the
-  `github-codereview` ingestion under license review and an executed results
-  table + plots) awaits the real dataset.
+  the real `app.adaptive` machinery, and 39 harness tests. **Part 2** in
+  progress: plotting tooling authored (`plots` extra, `experiments/run/plot_summary.py`)
+  and executed on the bundled sample — figures render with a baked-in
+  VERIFICATION-ONLY footnote (PNGs/CSVs gitignored). The `github-codereview`
+  ingestion under license review and the executed results table still await the
+  real dataset.
 - **Phase 18 part 1** done: Docker Compose topology, images, worker metrics
   exporter, beat scheduler, deployment runbook. **Part 2** (live
   `docker compose up` boot smoke + the Phase 16 part 2 broker run) needs a
