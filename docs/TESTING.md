@@ -18,11 +18,12 @@ integration lane below (never by fakes).
 | Worker metrics exporter | `tests/test_monitoring_worker_exporter.py` | yes |
 | Live-service integration (PostgreSQL) | `tests/test_db_integration.py`, `tests/test_orchestrator_db.py`, `tests/test_consolidation_db.py` | self-skip without a server |
 | Live-service pipeline (PostgreSQL + Redis) | `tests/test_integration_pipeline.py`, `tests/test_integration_crash_recovery.py` | self-skip without services |
+| Compose boot smoke (Phase 18 stack) | `tests/test_integration_compose_smoke.py` | self-skip without a Docker CLI/daemon |
 
 ## Running the gate
 
 ```bash
-python -m pytest -q            # 520 passed / 14 skipped (10 live-DB, 1 pipeline, 3 crash-recovery)
+python -m pytest -q            # 520 passed / 20 skipped (10 live-DB, 1 pipeline, 3 crash-recovery, 6 compose smoke)
 python -m ruff check .
 python -m ruff format --check .
 python -m mypy app
@@ -50,6 +51,13 @@ clear reason) when none are reachable:
   across recovery. Authored and gate-validated (self-skips with a clear reason
   without services); **execution is pending the Phase 18 stack** — no executed
   result is claimed for it until then.
+- Compose boot smoke (Phase 18 part 2, `tests/test_integration_compose_smoke.py`):
+  boots the full `docker-compose.yml` topology and asserts the published surface
+  — API/worker-exporter `/health`, frontend SPA, both Prometheus targets `up`
+  under the bearer gate, Grafana UI, 401 on the metrics endpoints without a
+  token, and the webhook route wired (401 unsigned; a signed accepted 202 when
+  the host exports `ADAPTIVE_GITHUB_WEBHOOK_SECRET`). Self-skips without a
+  Docker CLI/daemon; no boot result is claimed until it runs on a Docker host.
 
 This is the "broker delivery" seam promised in Phase 4: the providers used are
 the production ones — no mocks. Docker Compose wiring for these services is

@@ -24,7 +24,7 @@ pass.
 | 15 | Security hardening: auth, authz, rate limiting, injection defences, secret handling, audit | **done** (bearer-token authn/authz, feedback gating + list scoping, body cap, admin write actions + audit trail, see split notes below) |
 | 16 | Testing: unit, integration, API, queue, agent, DB, RAG, adaptive, webhook; failure scenarios | **part 1 done + part 2 authored** (worker-crash/restarted-in-flight live suite authored; exec pending Phase 18 stack — see split note below) |
 | 17 | Experiments: dataset (`github-codereview`) preprocessing, baselines, ablation, results, plots | **part 1 done + part 2 in progress** (plotting tooling authored + verification-only execution; dataset exec pending — see split note below) |
-| 18 | Deployment: docker-compose (api/worker/scheduler/redis/postgres/frontend/prometheus/grafana) | **part 1 done** (see split note below) |
+| 18 | Deployment: docker-compose (api/worker/scheduler/redis/postgres/frontend/prometheus/grafana) | **part 1 done + part 2 authored** (boot-smoke suite authored, self-skips; exec pending a Docker host — see split note below) |
 | 19 | Research documentation: ARCHITECTURE.md refinement, RESEARCH.md, EXPERIMENTS.md, final README | **done** (ARCHITECTURE.md aligned to the implemented system incl. the honest no-false-publication checkpoint; RESEARCH.md fleshed out — research questions, cited related-work plan with verification rule, evaluation plan, limitations, ethics, paper scaffold; EXPERIMENTS.md dataset/licensing + related-work anchor; README.md refreshed — cleaned diagram, accurate layout/status, quickstart, integrity statement; all deferred parts remain explicitly pending — no invented numbers or publication claims) |
 
 Phase gating rule: **no phase starts until the previous phase's tests pass.** When a
@@ -147,7 +147,7 @@ stays the system of record; restart recovery re-stages through the same ingest
 path (`stage_review_to_priority` + DB score loader) and the review is handed to
 fan-out exactly once — the no-duplicate-restart and priority-order-preserved
 across recovery follow-ups pin the contract. The suite self-skips without
-Postgres+Redis exactly like its siblings (520 passed / 14 skipped locally).
+Postgres+Redis exactly like its siblings (520 passed / 20 skipped locally).
 **Execution of the scenarios (and the broker-transport integration run) is
 pending the Phase 18 Compose stack — no executed result is claimed until then
 (README integrity rule).**
@@ -192,9 +192,13 @@ pipeline on the worker's :8001, so the queue stays observable with the API
 down; `monitoring.prometheus` gained a shared `render_prometheus_payload`
 helper used by both endpoints). Tests: `tests/test_monitoring_worker_exporter.py`
 + beat-schedule assertion (5 new tests). docs/DEPLOYMENT.md is the runbook
-(env/secrets, scaling, backup, observability). **Part 2** (next, needs a Docker
-host): the compose boot smoke plus the broker-transport run deferred from Phase
-16 part 2, which this stack finally provides the real broker for.
+(env/secrets, scaling, backup, observability). **Part 2** (in progress): the
+compose boot smoke is authored (`tests/test_integration_compose_smoke.py` — 6
+scenarios: API/worker liveness, frontend, Prometheus targets, Grafana UI,
+bearer-gated metrics, webhook reachable/accepted; self-skips without Docker and
+exec on a Docker host, 520 passed / 20 skipped locally) plus the
+broker-transport run deferred from Phase 16 part 2, which this stack finally
+provides the real broker for.
 
 ## Cross-cutting requirements (apply every phase)
 

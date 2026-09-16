@@ -60,7 +60,9 @@ behind the dashboard bearer-token gate, so Prometheus must present one:
 `authorization: { type: Bearer, credentials: <sk-... > }` where the token's
 digest is provisioned in `ADAPTIVE_API_TOKEN_HASHES` (all verbs are read-only,
 so a `viewer` token suffices). Full compose wiring landed in Phase 18
-(docs/DEPLOYMENT.md); the live stack smoke is pending a Docker host.
+(docs/DEPLOYMENT.md); the live stack smoke is authored
+(`tests/test_integration_compose_smoke.py`, self-skips) and pending a Docker
+host for execution.
 
 ## Langfuse LLM traces
 

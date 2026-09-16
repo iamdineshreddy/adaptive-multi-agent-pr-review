@@ -132,8 +132,10 @@ restart; in-flight work is governed by `acks_late` redelivery).
 
 The compose file, images, entrypoints and this runbook are static assets; the
 boot-time unit/integration suite (docs/TESTING.md) never depends on a running
-stack. A live `docker compose up --build` smoke (all 8 services healthy, one
-webhook ingestion end-to-end, Prometheus scraping both targets, Grafana
-dashboard rendering) must be executed on a Docker host as Phase 18 part 2 —
-until it runs, every claim above about container behaviour is pending that
+stack. A live boot smoke (all 8 services healthy, one webhook ingestion
+end-to-end, Prometheus scraping both targets, Grafana dashboard rendering) is
+**authored** as `tests/test_integration_compose_smoke.py` (Phase 18 part 2) and
+self-skips with a clear reason until the `docker` CLI is available; it must be
+executed on a Docker host with `pytest tests/test_integration_compose_smoke.py`.
+Until it runs, every claim above about container behaviour is pending that
 execution, not asserted.

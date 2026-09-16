@@ -122,7 +122,7 @@ pip install -e ".[dev,all]"
 cp ../.env.example .env
 alembic upgrade head                # needs PostgreSQL
 uvicorn app.main:app --reload       # http://localhost:8000/api/docs
-pytest -q                           # 520 passed / 14 skipped (no infra)
+pytest -q                           # 520 passed / 20 skipped (no infra)
 ```
 
 Full stack (needs a Docker host):
@@ -155,7 +155,7 @@ backend/
         database/       Async engine, session factory
         config/         pydantic-settings configuration
         monitoring/     Prometheus, Langfuse, structured logging
-    tests/              534 tests (unit + gated live-service lanes)
+    tests/              540 tests (unit + gated live-service lanes)
     alembic/            Schema migrations
 frontend/               React + TypeScript + Tailwind dashboard (Vite)
 infra/
@@ -193,9 +193,10 @@ silently cut):
   ingestion under license review and the executed results table still await the
   real dataset.
 - **Phase 18 part 1** done: Docker Compose topology, images, worker metrics
-  exporter, beat scheduler, deployment runbook. **Part 2** (live
-  `docker compose up` boot smoke + the Phase 16 part 2 broker run) needs a
-  Docker host and has not been executed.
+  exporter, beat scheduler, deployment runbook. **Part 2** in progress: the
+  live `docker compose up` boot smoke is authored (`tests/test_integration_compose_smoke.py`,
+  6 scenarios, self-skips) — execution plus the Phase 16 part 2 broker run still
+  need a Docker host and have not been executed.
 - **Phase 19** done: this README, `docs/ARCHITECTURE.md` refinement,
   `docs/RESEARCH.md`, `docs/EXPERIMENTS.md` finalisation.
 
