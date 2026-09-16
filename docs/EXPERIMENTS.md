@@ -133,12 +133,16 @@ All numbers outside part 2 remain "Results pending experimental validation".
 
 ## 8. Dataset & licensing status (Phase 17 part 2)
 
-- The primary corpus (`github-codereview`) is **not shipped or downloaded**:
-  `datasets/raw/` is gitignored, and no raw data has been ingested into the
-  pipeline yet.
-- Ingestion starts only after the license review note lands in
-  `datasets/README.md` (upstream dataset + upstream repositories), including a
-  provenance hash in the preprocess manifest per component.
+- **License review done.** The primary corpus is the Li et al. **CodeReview**
+  archive (EMNLP 2022 / arXiv:2203.09095) on Zenodo:
+  <https://zenodo.org/records/6900648> (DOI `10.5281/zenodo.6900648`, license
+  field verified **CC-BY-4.0** via the Zenodo REST API); collection provenance,
+  ingest-time gates (gitignored raw, per-component provenance hash, attribution,
+  no redistribution of extracted code, license re-verify) and a scope note
+  excluding a same-named third-party HF corpus are recorded in `datasets/README.md`.
+- The corpus is **not yet downloaded or ingested**: `datasets/raw/` is gitignored
+  and the full-table run awaits the download step (license + provenance hash per
+  component per the gates above).
 - The bundled `experiments/samples` corpus is a smoke fixture produced by hand
   (5 reviews / 21 comments) — it evidences pipeline behaviour, not results.
 - Related-work comparison targets are listed in `docs/RESEARCH.md` §3; any

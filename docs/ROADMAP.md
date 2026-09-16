@@ -162,18 +162,20 @@ labelled artifact + provenance manifest), the ARUM §5 metrics, the B1..B5 and
 A1..A6 baselines/ablations as declarative mode switches executed through the
 *same* `app.adaptive` feature/score/select machinery (no hand-wired alternate
 pipeline), CSV/JSON results and the ablation-vs-B5 delta table, and the
-end-to-end runner tests (`tests/test_experiments_*.py`; 39 new tests, 485 total
-pass). Results on the bundled smoke corpus are explicitly flagged as
+end-to-end runner tests (`tests/test_experiments_*.py`; 39 new harness tests).
+Results on the bundled smoke corpus are explicitly flagged as
 verification-only, never research numbers. **Part 2** (in progress): the
 plotting tooling is authored and executed verification-only — the `plots`
 extra (matplotlib via `backend/app/experiments/plots.py`) and the thin CLI
 `experiments/run/plot_summary.py` render `plot_metrics.png` +
 `plot_deltas_vs_b5.png` from the harness artifacts with a baked-in
 VERIFICATION-ONLY footnote (PNGs/CSVs gitignored; 8 new tests, 520 total
-pass). Remaining: `github-codereview` ingestion under a documented license
-review, an executed run of the full table on the real corpus, literature
-comparison for §2 baselines, and re-rendering the figures from that run.
-Until the real-corpus run lands, every results table remains
+pass), and the **license review for `github-codereview` is done** (Li et al.
+CodeReview archive, Zenodo 6900648, verified CC-BY-4.0, ingest-time gates —
+see `datasets/README.md`). Remaining: downloading + ingesting the corpus, an
+executed run of the full table on the real corpus, literature comparison for
+§2 baselines, and re-rendering the figures from that run. Until the
+real-corpus run lands, every results table remains
 "Results pending experimental validation".
 
 Phase 18 scope note (deliberate split): deployment assets are written and gated

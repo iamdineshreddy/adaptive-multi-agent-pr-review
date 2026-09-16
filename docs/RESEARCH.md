@@ -45,7 +45,7 @@ Each question is answered only from executed runs over the labelled
 | --- | --- | --- |
 | Multi-agent LLM systems | Wu et al., *AutoGen* (2023); Hong et al., *MetaGPT* (2023); Du et al., *Improving Factuality ... Multiagent Debate* (2023) | Agent fan-out with a coordinating supervisor; we add a deterministic decision/reduction stage after the LLM layer |
 | Automated code review | Li et al., *CodeReviewer: Pre-Training for Code Review* (EMNLP 2022); Lu et al., *CodeXGLUE*; Tufano et al., *Empirical Study ... Bug-Fixing Patches* (2021) | Detection side of the pipeline; complements (does not replace) review-comment generation |
-| Code-review datasets | Li et al., `github-codereview` (2022); Liang et al., *Code Reviews with LLMs* (related corpora) | Primary evaluation data; labelling/licensing per `datasets/README.md` |
+| Code-review datasets | Li et al., *CodeReviewer* (EMNLP 2022), `github-codereview` = CodeReview archive, DOI `10.5281/zenodo.6900648` (CC-BY-4.0); Liang et al., *Code Reviews with LLMs* (related corpora) | Primary evaluation data; labelling/licensing per `datasets/README.md` |
 | Learning to rank | Burges, *From RankNet to LambdaRank to LambdaMART* (2010); Liu, *Learning to Rank for Information Retrieval* (2011) | ARUM ranking + weight fitting are a linear-LTR formulation over interpretable features |
 | Semantics of redundancy | Reimers & Gurevych, *Sentence-BERT* (2019); pgvector (vector similarity index project) | Grouping duplicate findings via normalised cosine + category + proximity |
 | Explicit reinforcement/online preference | Standard online-learning / bandit textbooks (Sutton & Barto; Robbins 1952) | Temporal decay + per-repo weight candidates framed as online preference adaptation |

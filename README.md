@@ -189,9 +189,10 @@ silently cut):
   the real `app.adaptive` machinery, and 39 harness tests. **Part 2** in
   progress: plotting tooling authored (`plots` extra, `experiments/run/plot_summary.py`)
   and executed on the bundled sample — figures render with a baked-in
-  VERIFICATION-ONLY footnote (PNGs/CSVs gitignored). The `github-codereview`
-  ingestion under license review and the executed results table still await the
-  real dataset.
+VERIFICATION-ONLY footnote (PNGs/CSVs gitignored). The `github-codereview`
+  source is licensed for ingestion (Li et al. CodeReview archive, Zenodo,
+  CC-BY-4.0 — `datasets/README.md`); downloading + ingesting that corpus and
+  the executed results table are the remaining dataset step.
 - **Phase 18 part 1** done: Docker Compose topology, images, worker metrics
   exporter, beat scheduler, deployment runbook. **Part 2** in progress: the
   live `docker compose up` boot smoke is authored (`tests/test_integration_compose_smoke.py`,
