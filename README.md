@@ -122,7 +122,7 @@ pip install -e ".[dev,all]"
 cp ../.env.example .env
 alembic upgrade head                # needs PostgreSQL
 uvicorn app.main:app --reload       # http://localhost:8000/api/docs
-pytest -q                           # 512 passed / 11 skipped (no infra)
+pytest -q                           # 512 passed / 14 skipped (no infra)
 ```
 
 Full stack (needs a Docker host):
@@ -155,7 +155,7 @@ backend/
         database/       Async engine, session factory
         config/         pydantic-settings configuration
         monitoring/     Prometheus, Langfuse, structured logging
-    tests/              512 tests (unit + gated live-service lanes)
+    tests/              526 tests (unit + gated live-service lanes)
     alembic/            Schema migrations
 frontend/               React + TypeScript + Tailwind dashboard (Vite)
 infra/
@@ -181,8 +181,9 @@ silently cut):
   review, dashboard, observability, security.
 - **Phase 16 part 1** done: QA gates codified — `docs/TESTING.md` (suite lanes,
   gate commands, live-service self-skip), failure-scenario coverage map, queue /
-  webhook / pipeline test seams. **Part 2** (worker-crash-under-broker; broker
-  transport run) needs the Phase 18 stack.
+  webhook / pipeline test seams. **Part 2** (worker-crash / restarted-in-flight
+  scenario) authored as a live-gated self-skip suite; its execution and the
+  broker-transport run need the Phase 18 stack.
 - **Phase 17 part 1** done: reproducible experiment harness (`app/experiments` +
   `experiments/`) with label pre-processing, B1–B5 + A1–A6 ablation modes over
   the real `app.adaptive` machinery, and 39 harness tests. **Part 2** (the

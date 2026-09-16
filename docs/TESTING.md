@@ -17,12 +17,12 @@ integration lane below (never by fakes).
 | Experiment harness (selection layer) | `tests/test_experiments_*.py` | yes |
 | Worker metrics exporter | `tests/test_monitoring_worker_exporter.py` | yes |
 | Live-service integration (PostgreSQL) | `tests/test_db_integration.py`, `tests/test_orchestrator_db.py`, `tests/test_consolidation_db.py` | self-skip without a server |
-| Live-service pipeline (PostgreSQL + Redis) | `tests/test_integration_pipeline.py` | self-skip without services |
+| Live-service pipeline (PostgreSQL + Redis) | `tests/test_integration_pipeline.py`, `tests/test_integration_crash_recovery.py` | self-skip without services |
 
 ## Running the gate
 
 ```bash
-python -m pytest -q            # 490 passed / 11 skipped (10 live-DB, 1 pipeline)
+python -m pytest -q            # 512 passed / 14 skipped (10 live-DB, 1 pipeline, 3 crash-recovery)
 python -m ruff check .
 python -m ruff format --check .
 python -m mypy app
@@ -40,6 +40,16 @@ clear reason) when none are reachable:
   webhook → `SqlReviewIngester` → priority zset (`stage_review_to_priority` with
   the DB score loader) → `pop_and_dispatch` hand-off
   (`tests/test_integration_pipeline.py`).
+- Worker-crash / restarted-in-flight recovery (same services,
+  `tests/test_integration_crash_recovery.py`, Phase 16 part 2): a worker crash
+  between the zset pop and the fan-out dispatch leaves the review off the zset
+  while the DB row stays the system of record; restart recovery re-stages
+  through the ingest path (`stage_review_to_priority` + DB score loader) and the
+  review reaches fan-out exactly once. Three scenarios: crash-then-recover from
+  the DB, no-duplicate hand-off after restart, and priority order preserved
+  across recovery. Authored and gate-validated (self-skips with a clear reason
+  without services); **execution is pending the Phase 18 stack** — no executed
+  result is claimed for it until then.
 
 This is the "broker delivery" seam promised in Phase 4: the providers used are
 the production ones — no mocks. Docker Compose wiring for these services is

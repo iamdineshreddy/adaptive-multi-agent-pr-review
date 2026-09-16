@@ -22,7 +22,7 @@ pass.
 | 13 | Frontend dashboard (React + TS + Tailwind): queues, reviews, findings, feedback, memory, metrics | **done** (dashboard read API + React dashboard, see split note below) |
 | 14 | Observability: Langfuse traces, Prometheus metrics, Grafana dashboards, structured logs | **done** (structured logs + Prometheus metrics + Grafana provisioning + Langfuse tracing; see split note below) |
 | 15 | Security hardening: auth, authz, rate limiting, injection defences, secret handling, audit | **done** (bearer-token authn/authz, feedback gating + list scoping, body cap, admin write actions + audit trail, see split notes below) |
-| 16 | Testing: unit, integration, API, queue, agent, DB, RAG, adaptive, webhook; failure scenarios | **part 1 done** (see split note below) |
+| 16 | Testing: unit, integration, API, queue, agent, DB, RAG, adaptive, webhook; failure scenarios | **part 1 done + part 2 authored** (worker-crash/restarted-in-flight live suite authored; exec pending Phase 18 stack — see split note below) |
 | 17 | Experiments: dataset (`github-codereview`) preprocessing, baselines, ablation, results, plots | **part 1 done** (see split note below) |
 | 18 | Deployment: docker-compose (api/worker/scheduler/redis/postgres/frontend/prometheus/grafana) | **part 1 done** (see split note below) |
 | 19 | Research documentation: ARCHITECTURE.md refinement, RESEARCH.md, EXPERIMENTS.md, final README | **done** (ARCHITECTURE.md aligned to the implemented system incl. the honest no-false-publication checkpoint; RESEARCH.md fleshed out — research questions, cited related-work plan with verification rule, evaluation plan, limitations, ethics, paper scaffold; EXPERIMENTS.md dataset/licensing + related-work anchor; README.md refreshed — cleaned diagram, accurate layout/status, quickstart, integrity statement; all deferred parts remain explicitly pending — no invented numbers or publication claims) |
@@ -138,10 +138,19 @@ API-level wiring (`tests/test_webhooks.py`), and a live-service end-to-end
 pipeline test (`tests/test_integration_pipeline.py` — webhook ingest → priority
 zset via the DB score loader → `pop_and_dispatch`, the Phase 4 "broker
 delivery" seam; PostgreSQL+Redis-gated and self-skipping like its siblings).
-446 tests pass (11 live-service self-skip). **Part 2** (next): a
-pipeline-triggered worker crash / restarted-in-flight scenario exercising the
-queue state machine under a real broker, and, with Phase 18 Compose, the
-broker-transport integration run.
+446 tests pass (11 live-service self-skip). **Part 2** (this pass): the
+pipeline-triggered worker-crash / restarted-in-flight scenario is authored as a
+live-gated suite (`tests/test_integration_crash_recovery.py`) exercising the
+queue state machine under the *real* broker+DB pair: a crash between the zset
+pop and the fan-out dispatch leaves the review off the zset while the DB row
+stays the system of record; restart recovery re-stages through the same ingest
+path (`stage_review_to_priority` + DB score loader) and the review is handed to
+fan-out exactly once — the no-duplicate-restart and priority-order-preserved
+across recovery follow-ups pin the contract. The suite self-skips without
+Postgres+Redis exactly like its siblings (512 passed / 14 skipped locally).
+**Execution of the scenarios (and the broker-transport integration run) is
+pending the Phase 18 Compose stack — no executed result is claimed until then
+(README integrity rule).**
 
 Phase 17 scope note (deliberate split): the experiment pipeline is built and
 gated first, so the dataset/result work has a verified, honest seam to run
