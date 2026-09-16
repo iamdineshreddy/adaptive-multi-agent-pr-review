@@ -147,7 +147,7 @@ stays the system of record; restart recovery re-stages through the same ingest
 path (`stage_review_to_priority` + DB score loader) and the review is handed to
 fan-out exactly once — the no-duplicate-restart and priority-order-preserved
 across recovery follow-ups pin the contract. The suite self-skips without
-Postgres+Redis exactly like its siblings (520 passed / 20 skipped locally).
+Postgres+Redis exactly like its siblings (534 passed / 20 skipped locally).
 **Execution of the scenarios (and the broker-transport integration run) is
 pending the Phase 18 Compose stack — no executed result is claimed until then
 (README integrity rule).**
@@ -172,10 +172,16 @@ extra (matplotlib via `backend/app/experiments/plots.py`) and the thin CLI
 VERIFICATION-ONLY footnote (PNGs/CSVs gitignored; 8 new tests, 520 total
 pass), and the **license review for `github-codereview` is done** (Li et al.
 CodeReview archive, Zenodo 6900648, verified CC-BY-4.0, ingest-time gates —
-see `datasets/README.md`). Remaining: downloading + ingesting the corpus, an
-executed run of the full table on the real corpus, literature comparison for
-§2 baselines, and re-rendering the figures from that run. Until the
-real-corpus run lands, every results table remains
+see `datasets/README.md`). The **ingestion mapper is authored + verified** on
+the bundled sample chain (`app/experiments/ingest.py` +
+`experiments/ingest/code_review_ingest.py`): mechanical archive fields +
+annotation overlay under the documented protocol, with machine-readable
+exclusions for anything the overlay does not cover (nothing inferred; 14 new
+tests, 534 total pass). Remaining: downloading the corpus (per the license
+gates), an annotation pass over the extracted review-ids (per the
+datasets/README.md protocol), an executed run of the full table on the real
+corpus, literature comparison for §2 baselines, and re-rendering the figures
+from that run. Until the real-corpus run lands, every results table remains
 "Results pending experimental validation".
 
 Phase 18 scope note (deliberate split): deployment assets are written and gated
@@ -198,7 +204,7 @@ helper used by both endpoints). Tests: `tests/test_monitoring_worker_exporter.py
 compose boot smoke is authored (`tests/test_integration_compose_smoke.py` — 6
 scenarios: API/worker liveness, frontend, Prometheus targets, Grafana UI,
 bearer-gated metrics, webhook reachable/accepted; self-skips without Docker and
-exec on a Docker host, 520 passed / 20 skipped locally) plus the
+exec on a Docker host, 534 passed / 20 skipped locally) plus the
 broker-transport run deferred from Phase 16 part 2, which this stack finally
 provides the real broker for.
 

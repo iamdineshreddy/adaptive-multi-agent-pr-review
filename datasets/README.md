@@ -96,6 +96,64 @@ Guarding principle (docs/Auth.md): **code changed is never itself labelled
 developer-accepted.** Every positive label requires suggestion-matching
 implementation evidence or an explicit thread outcome.
 
+### Ingestion & annotation protocol
+
+`experiments/ingest/code_review_ingest.py` maps the Zenodo CodeReview archive
+into this raw schema without inventing anything:
+
+```
+python experiments/ingest/code_review_ingest.py archive.jsonl \
+    --annotation annotation.jsonl \
+    --out raw.jsonl --excluded excluded.jsonl --manifest manifest.json
+```
+
+Mechanical mapping (from the archive, no interpretation): `review_id`
+(deterministic content hash, or the archive's `comment_id` when present),
+`comment`, `file_path`, `round`, `memory`, optional line numbers;
+`implemented_later` = the before/after pair differs; `is_review_comment` and
+`related_to_feedback` are structural properties of the archive's review-driven
+triplets; **nothing is inferred about whether the change matches the comment**.
+
+The archive supplies **no** `category` / `severity` / `confidence` /
+`reviewer`, and no suggestion-matching evidence beyond the changed pair. Those
+fields come **only** from an annotation overlay JSONL keyed by the mechanical
+`review_id`:
+
+```json
+{"review_id": "comment-101", "category": "quality/maintainability",
+ "severity": "low", "confidence": 0.9, "reviewer": "annotator-id",
+ "implementation": "verbatim", "suggested_fix": "Extract the base URL once."}
+```
+
+Overlay fields: `category` (ARUM agent-category taxonomy, docs/AGENTS.md),
+`severity`, `confidence` (annotator certainty in [0,1]), `reviewer`,
+`round`, `implementation` (`verbatim`|`partial`|`modified`), `explicit_outcome`,
+`actionable`, `suggested_fix`, `memory`. Protocol rules:
+
+- `implementation` is recorded **only** when the annotator verified the
+  comment's suggestion matches the changed code (the Auth.md evidence bar);
+  otherwise it is left absent (→ `changed_unclassified`, excluded).
+- `explicit_outcome` comes from an explicit thread record (accept/dismiss/…),
+  never from the change alone.
+- Records with a missing overlay entry, or an incomplete one, are written to
+  `excluded.jsonl` with a machine-readable reason
+  (`annotation_required` / `annotation_missing` / `annotation_incomplete:<field>`),
+  never silently defaulted.
+- Invalid enum values or malformed archives fail loudly (loud data-quality
+  gate, never a silent drop).
+- The manifest records archive sha256, the DOI/license of the source
+  (10.5281/zenodo.6900648, CC-BY-4.0), counts, exclusion reasons, and a
+  **labelled preview** produced by running the included records through the
+  real `build_corpus` label rules (proving the audit trail, not a separate
+  model).
+
+Two-pass flow: (1) ingest without `--annotation` → every record excluded as
+`annotation_required` with a stable `review_id`; (2) annotate those ids per the
+protocol above; (3) re-ingest with `--annotation` and ship `raw.jsonl` into
+`preprocess.py` → `run_all.py`. Bundled demo fixtures:
+`samples/code_review_archive_sample.jsonl` +
+`samples/code_review_annotation_sample.jsonl` (verification-only).
+
 ## Candidate supplementary datasets
 
 `CodeReviewer`, `Review-Reviewer`, and security-focused bench packs (OWASP

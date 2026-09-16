@@ -140,8 +140,18 @@ All numbers outside part 2 remain "Results pending experimental validation".
   ingest-time gates (gitignored raw, per-component provenance hash, attribution,
   no redistribution of extracted code, license re-verify) and a scope note
   excluding a same-named third-party HF corpus are recorded in `datasets/README.md`.
+- **Ingestion mapper authored + verified on the sample chain.** 
+  `app/experiments/ingest.py` + the `experiments/ingest/code_review_ingest.py`
+  CLI map mechanical archive fields and splice the annotation overlay under the
+  documented `datasets/README.md` protocol; records the overlay does not fully
+  cover are excluded with machine-readable reasons (nothing inferred). Verified
+  end-to-end: bundled archive sample → `preprocess.py`-shaped `raw.jsonl` →
+  `run_all.py` executes (verification-only). Each overlay entry's
+  `implementation`/`explicit_outcome` is an annotation judgement, not a
+  pipeline inference (docs/Auth.md).
 - The corpus is **not yet downloaded or ingested**: `datasets/raw/` is gitignored
-  and the full-table run awaits the download step (license + provenance hash per
+  and the full-table run awaits the download step plus an annotation pass over
+  the extracted review-ids per the protocol above (license + provenance hash per
   component per the gates above).
 - The bundled `experiments/samples` corpus is a smoke fixture produced by hand
   (5 reviews / 21 comments) — it evidences pipeline behaviour, not results.

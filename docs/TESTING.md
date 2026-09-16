@@ -23,7 +23,7 @@ integration lane below (never by fakes).
 ## Running the gate
 
 ```bash
-python -m pytest -q            # 520 passed / 20 skipped (10 live-DB, 1 pipeline, 3 crash-recovery, 6 compose smoke)
+python -m pytest -q            # 534 passed / 20 skipped (10 live-DB, 1 pipeline, 3 crash-recovery, 6 compose smoke)
 python -m ruff check .
 python -m ruff format --check .
 python -m mypy app

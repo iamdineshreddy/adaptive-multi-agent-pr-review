@@ -122,7 +122,7 @@ pip install -e ".[dev,all]"
 cp ../.env.example .env
 alembic upgrade head                # needs PostgreSQL
 uvicorn app.main:app --reload       # http://localhost:8000/api/docs
-pytest -q                           # 520 passed / 20 skipped (no infra)
+pytest -q                           # 534 passed / 20 skipped (no infra)
 ```
 
 Full stack (needs a Docker host):
@@ -155,7 +155,7 @@ backend/
         database/       Async engine, session factory
         config/         pydantic-settings configuration
         monitoring/     Prometheus, Langfuse, structured logging
-    tests/              540 tests (unit + gated live-service lanes)
+    tests/              554 tests (unit + gated live-service lanes)
     alembic/            Schema migrations
 frontend/               React + TypeScript + Tailwind dashboard (Vite)
 infra/
@@ -238,3 +238,4 @@ and reproducible experiment scripts is documented. **No experimental results wil
 fabricated.** If an experiment has not been executed, the corresponding report states
 "Results pending experimental validation". See `docs/RESEARCH.md` for the contribution
 statement and citation policy.
+

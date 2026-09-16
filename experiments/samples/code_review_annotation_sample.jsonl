@@ -1,0 +1,2 @@
+{"review_id": "comment-101", "category": "quality/maintainability", "severity": "low", "confidence": 0.9, "reviewer": "annotator-demo", "implementation": "verbatim", "suggested_fix": "Extract the base URL once and interpolate the tenant path."}
+{"review_id": "comment-102", "category": "performance/memory", "severity": "medium", "confidence": 0.8, "reviewer": "annotator-demo", "implementation": "partial"}
