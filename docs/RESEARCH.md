@@ -55,6 +55,46 @@ Before submission, every citation must be re-verified (authors, venue, year, arX
 ID/DOI) and the metadata filled in the bibliography; **no citation is included
 that cannot be resolved to a specific, citable artefact.**
 
+### Comparison protocol (Phase 17 part 2)
+
+Two claim classes, never conflated:
+
+- **(a) Methodological / design comparisons** — prose contrast against the
+  cited work (agent topology, selection layer, redundancy handling). These need
+  no executed numbers, just the citation; they never assert performance.
+- **(b) Quantitative comparisons** — only against *executed* runs on the
+  labelled corpus slice (§4). A quantitative claim must state **both systems'
+  corpus + split + metric + seed**, and compares only same-task, same-metric
+  settings. Cross-corpus numeric comparison is prohibited (our slice ≠ their
+  benchmark splits).
+
+Baseline-to-literature mapping (used for class (a) context and, where a
+same-task setting exists, for a future class (b) comparison):
+
+| Our mode | Nearest literature anchor | Relation |
+| --- | --- | --- |
+| B1 (one reviewer, all findings) | Tufano et al., bug-fixing-patch quality (2021); CodeXGLUE code-review comment quality | Unfiltered review emission; the "report everything" baseline |
+| B2 (multi-agent, dedup-only) | AutoGen / MetaGPT-style multi-agent scaffolds (without a selection gate) | Fan-out + aggregation without a decision layer |
+| B3 (static ARUM weights + budget) | Burges, *From RankNet to LambdaRank* (2010); Liu, LTR survey (2011) | Fixed-weight linear ranking + cap as a non-learnt filter |
+| B4 (learned weights + repo memory) | Online preference / implicit-feedback LTR (bandit textbooks; Robbins 1952) | Per-repo weight adaptation from feedback signals |
+| B5 (gates, iteration, disagreement) | Li et al., CodeReviewer (2022) system framing | End-to-end review pipeline; compared as a system, not one task |
+| A1..A6 (ablations) | — | Internal attribution vs B5; not a literature comparison |
+
+Metric mapping (ARUM §5 vs the literature; where no counterpart exists we
+report ours descriptively and say so):
+
+| ARUM §5 metric | Comparable literature metric | Notes |
+| --- | --- | --- |
+| precision / recall / F1 on actionable findings | CodeReviewer task-accuracy and comment-relevance; CodeXGLUE quality prediction | Same-task comparisons must re-run their benchmark protocol, not reuse their reported tables against different splits |
+| redundancy reduction | Duplicate/overlap comment rate (Li et al. data curation) | Descriptive only; no agreed corpus-level metric exists |
+| acceptance rate / actionability | Implemented / acknowledged comment rate (Tufano patch adoption) | Proxies only; label provenance differs per study |
+
+Rules: methodological paragraphs carry the citation and are committed now;
+numeric cells stay "no executed run — results pending" (no fabrications, never
+assert novelty, docs/EXPERIMENTS.md §6). A literature-claims ledger (one row
+per claim, mapping to this protocol) is maintained during the final run and
+submission, not in advance.
+
 ## 4. Evaluation plan
 
 - **Corpus**: primary `github-codereview` slice under a reviewed license

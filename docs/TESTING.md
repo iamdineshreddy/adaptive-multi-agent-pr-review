@@ -1,8 +1,8 @@
 # Testing
 
 Phase 16 organizes and hardens the repository suite. Coverage is measured per
-phase; the current baseline is **84% line coverage over `backend/app`
-(5243 statements, 830 uncovered)**, with the bulk of uncovered code in the
+phase; the current baseline is **85% line coverage over `backend/app`
+(5378 statements, 820 uncovered)**, with the bulk of uncovered code in the
 PostgreSQL/Redis-backed Sql+Redis implementations and the LLM/orchestration
 paths that need a live database or provider and are exercised by the gated
 integration lane below (never by fakes).

@@ -155,6 +155,11 @@ All numbers outside part 2 remain "Results pending experimental validation".
   component per the gates above).
 - The bundled `experiments/samples` corpus is a smoke fixture produced by hand
   (5 reviews / 21 comments) — it evidences pipeline behaviour, not results.
-- Related-work comparison targets are listed in `docs/RESEARCH.md` §3; any
-  baseline/ablation number compared against them will cite the specific work and
-  state the comparison protocol at the time of the run.
+- Related-work comparison targets are listed in `docs/RESEARCH.md` §3.
+  **The comparison protocol is authored** (§3 "Comparison protocol"): two claim
+  classes (methodological prose vs executed-number comparisons), a
+  baseline-to-literature mapping for B1–B5/A1–A6, a metric mapping, and the
+  cross-corpus-comparison prohibition. Any baseline/ablation number compared
+  against a cited work will cite the specific work and satisfy the protocol at
+  the time of the run; numeric cells stay "no executed run — results pending"
+  until then.

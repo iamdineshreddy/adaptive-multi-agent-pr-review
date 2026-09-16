@@ -129,7 +129,7 @@ Phase 16 scope note (deliberate split): the suite is organized and hardened in
 documented passes. **Part 1** (this pass): the QA gates that phases 0–15 already
 employed are now codified — `docs/TESTING.md` (suite lanes, gate commands,
 live-service self-skip mechanism, failure-scenario coverage map) plus the
-coverage baseline (84% line over `backend/app`); new coverage fills the
+coverage baseline (85% line over `backend/app`); new coverage fills the
 previously untested seams: the Celery task wrappers (`tests/test_queue_tasks.py`
 — bounded retry countdown, dead-letter + `MaxRetriesExceededError` on
 exhaustion, `pop_and_stage_task` pop→dispatch hand-off), the real
@@ -177,11 +177,15 @@ the bundled sample chain (`app/experiments/ingest.py` +
 `experiments/ingest/code_review_ingest.py`): mechanical archive fields +
 annotation overlay under the documented protocol, with machine-readable
 exclusions for anything the overlay does not cover (nothing inferred; 14 new
-tests, 534 total pass). Remaining: downloading the corpus (per the license
-gates), an annotation pass over the extracted review-ids (per the
+tests, 534 total pass). The **literature-comparison protocol is authored**
+(`docs/RESEARCH.md` §3 — two claim classes, baseline→literature and metric
+mappings, cross-corpus-comparison prohibition). Remaining: downloading the
+corpus (per the license gates, connection currently too slow — deferred),
+an annotation pass over the extracted review-ids (per the
 datasets/README.md protocol), an executed run of the full table on the real
-corpus, literature comparison for §2 baselines, and re-rendering the figures
-from that run. Until the real-corpus run lands, every results table remains
+corpus, quantitative (executed-numbers) literature comparison per the
+authored protocol, and re-rendering the figures from that run. Until the
+real-corpus run lands, every results table remains
 "Results pending experimental validation".
 
 Phase 18 scope note (deliberate split): deployment assets are written and gated
