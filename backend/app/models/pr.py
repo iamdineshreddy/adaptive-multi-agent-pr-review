@@ -129,6 +129,8 @@ class Review(Base):
     root_cause: Mapped[str | None] = mapped_column(Text)
     supervisor_notes: Mapped[list[str] | None] = mapped_column(JSONB)
     status_history: Mapped[list[dict[str, Any]] | None] = mapped_column(JSONB)
+    github_review_id: Mapped[int | None] = mapped_column(BigInteger)
+    published_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     budget_cap: Mapped[int | None] = mapped_column(Integer)
     arum_version: Mapped[str | None] = mapped_column(Text)
     feedback_aggregate: Mapped[dict[str, Any] | None] = mapped_column(JSONB)

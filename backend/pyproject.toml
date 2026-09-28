@@ -100,6 +100,10 @@ module = ["app.orchestrator.tasks"]
 disable_error_code = ["untyped-decorator", "no-untyped-def", "no-any-return"]
 
 [[tool.mypy.overrides]]
+module = ["app.publisher.tasks"]
+disable_error_code = ["untyped-decorator", "no-untyped-def", "no-any-return"]
+
+[[tool.mypy.overrides]]
 # LightGBM/numpy ship no strict type stubs; the adaptive training path imports
 # them lazily inside guarded functions and treats them as external deps.
 module = ["lightgbm", "numpy"]

@@ -99,6 +99,7 @@ def test_enum_member_values_match_documentation() -> None:
         "AGENTS_RUNNING",
         "CONSOLIDATING",
         "DECIDING",
+        "PUBLISHING",
         "PUBLISHED",
         "WAITING_FOR_FEEDBACK",
         "ITERATING",

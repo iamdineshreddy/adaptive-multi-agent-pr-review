@@ -121,6 +121,52 @@ class TestGitHubClient:
         assert exc.value.status_code == status
         assert exc.value.retryable is retryable
 
+    async def test_create_pull_request_review(self) -> None:
+        def handler(request: httpx.Request) -> httpx.Response:
+            assert request.method == "POST"
+            assert request.url.path == "/repos/org/repo/pulls/12/reviews"
+            import json
+            payload = json.loads(request.content)
+            assert payload["commit_id"] == "abc123"
+            assert payload["event"] == "COMMENT"
+            assert payload["comments"][0]["path"] == "app/auth.py"
+            assert payload["comments"][0]["line"] == 10
+            return httpx.Response(
+                201,
+                json={
+                    "id": 77,
+                    "html_url": "https://example/review/77",
+                    "state": "COMMENTED",
+                    "comments": [
+                        {
+                            "id": 900,
+                            "path": "app/auth.py",
+                            "line": 10,
+                            "body": "hi",
+                        }
+                    ],
+                },
+            )
+
+        client = _client(handler)
+        from app.github.schemas import PullRequestReviewWrite, ReviewCommentWrite
+
+        result = await client.create_pull_request_review(
+            "org",
+            "repo",
+            12,
+            PullRequestReviewWrite(
+                commit_id="abc123",
+                event="COMMENT",
+                body="Review summary",
+                comments=[ReviewCommentWrite(path="app/auth.py", line=10, body="hi")],
+            ),
+        )
+        assert result.id == 77
+        assert result.state == "COMMENTED"
+        assert [c.id for c in result.comments] == [900]
+        assert result.comments[0].path == "app/auth.py"
+
     async def test_timeout_is_retryable(self) -> None:
         def handler(request: httpx.Request) -> httpx.Response:
             raise httpx.TimeoutException("slow", request=request)

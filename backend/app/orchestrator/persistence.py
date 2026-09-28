@@ -15,9 +15,10 @@ from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from typing import Any, Protocol
 
-from sqlalchemy import func, select
+from sqlalchemy import and_, cast, func, or_, select
 from sqlalchemy import text as sa_text
 from sqlalchemy import update as sa_update
+from sqlalchemy.dialects.postgresql import JSONB
 
 from app.adaptive.feedback import FeedbackWrite, feedback_identity
 from app.adaptive.memory import FeedbackEvent
@@ -93,6 +94,14 @@ class AdminAuditWrite:
 
 def utc_now() -> datetime:
     return datetime.now(UTC)
+
+
+def _as_float(value: object) -> float | None:
+    """Best-effort numeric coercion for memory-store bookkeeping rows."""
+    try:
+        return None if value is None else float(value)
+    except (TypeError, ValueError):
+        return None
 
 
 def _rerun_priority(
@@ -314,6 +323,51 @@ class OrchestratorStore(Protocol):
     ) -> None: ...
 
     async def apply_decision(self, review_id: object, decision: Decision) -> None: ...
+
+    # --- Publication layer (PUBLISH step, docs/ARCHITECTURE.md §4.5) -----------
+    async def list_reviews_pending_publication(
+        self, *, limit: int, claim_stale_before: datetime
+    ) -> list[str]:
+        """Review ids awaiting publication: DECIDING/ITERATING plus PUBLISHING
+        rows whose claim is older than ``claim_stale_before`` (worker-crash
+        recovery). Ordered most-urgent first (priority desc, id asc)."""
+
+    async def claim_review_for_publication(
+        self, review_id: object, *, claim_stale_before: datetime
+    ) -> bool:
+        """Atomically flip one review to PUBLISHING if it is reclaimable.
+
+        Only the winner returns True, so concurrent publisher tasks (or a beat
+        re-scan after a worker crash) never double-claim a review.
+        """
+
+    async def release_review_from_publication(self, review_id: object) -> None:
+        """Return a claimed (PUBLISHING) review to DECIDING so the scan re-tries
+        after a transient failure (heartbeat-style retry, no double-post)."""
+
+    async def publication_payload(self, review_id: object) -> dict[str, Any] | None:
+        """Everything the publisher needs for one review: the PR/repo identity,
+        head sha, and the scheduled (selected) findings in deterministic order."""
+
+    async def mark_findings_published(
+        self,
+        review_id: object,
+        updates: Sequence[tuple[str, int | None]],
+    ) -> None:
+        """Record posted findings: each (finding_id, github_comment_id) pair is
+        set PUBLISHED. A relative ``None`` comment id means the finding's text was
+        folded into the review body because GitHub rejected it as off-diff."""
+
+    async def mark_review_published(
+        self,
+        review_id: object,
+        *,
+        github_review_id: int | None,
+        published_at: datetime,
+    ) -> None:
+        """Transition the review to PUBLISHED with its GitHub review id + time.
+        ``github_review_id`` is ``None`` when nothing was posted inline (e.g. all
+        findings degraded into the body)."""
 
     # --- Phase 10: repository memory + RAG -----------------------------------
     async def get_repository_memory(
@@ -684,6 +738,145 @@ class MemoryOrchestratorStore:
                     and row["id"] != decision.finding_id
                 ):
                     row["publication_status"] = FindingStatus.SUPPRESSED.value
+
+    # --- Publication layer (PUBLISH step, docs/ARCHITECTURE.md §4.5) -----------
+
+    async def list_reviews_pending_publication(
+        self, *, limit: int, claim_stale_before: datetime
+    ) -> list[str]:
+        candidates: list[tuple[str, float | None]] = []
+        for rid, record in self.reviews.items():
+            status = record.get("status")
+            if status in (ReviewStatus.DECIDING.value, ReviewStatus.ITERATING.value):
+                candidates.append((rid, _as_float(record.get("priority_score"))))
+            elif status == ReviewStatus.PUBLISHING.value:
+                claimed = record.get("claimed_at")
+                if claimed is None:
+                    continue
+                if datetime.fromisoformat(claimed) <= claim_stale_before:
+                    candidates.append((rid, _as_float(record.get("priority_score"))))
+        candidates.sort(key=lambda item: (-(item[1] or 0.0), item[0]))
+        return [rid for rid, _ in candidates[:limit]]
+
+    async def claim_review_for_publication(
+        self, review_id: object, *, claim_stale_before: datetime
+    ) -> bool:
+        key = str(review_id)
+        record = self.reviews.get(key)
+        if record is None:
+            return False
+        status = record.get("status")
+        allowed = {
+            ReviewStatus.DECIDING.value,
+            ReviewStatus.ITERATING.value,
+            ReviewStatus.PUBLISHING.value,
+        }
+        if status not in allowed:
+            return False
+        if status == ReviewStatus.PUBLISHING.value:
+            claimed = record.get("claimed_at")
+            if (
+                claimed is None
+                or datetime.fromisoformat(claimed) > claim_stale_before
+            ):
+                return False
+        now = utc_now()
+        record["status"] = ReviewStatus.PUBLISHING.value
+        record["claimed_at"] = now.isoformat()
+        record.setdefault("status_history", []).append(
+            {
+                "status": ReviewStatus.PUBLISHING.value,
+                "from": status,
+                "at": now.isoformat(),
+            }
+        )
+        return True
+
+    async def release_review_from_publication(self, review_id: object) -> None:
+        key = str(review_id)
+        record = self.reviews.get(key)
+        if (
+            record is None
+            or record.get("status") != ReviewStatus.PUBLISHING.value
+        ):
+            return
+        now = utc_now()
+        record["status"] = ReviewStatus.DECIDING.value
+        record.pop("claimed_at", None)
+        record.setdefault("status_history", []).append(
+            {
+                "status": ReviewStatus.DECIDING.value,
+                "from": ReviewStatus.PUBLISHING.value,
+                "at": now.isoformat(),
+            }
+        )
+
+    async def publication_payload(self, review_id: object) -> dict[str, Any] | None:
+        key = str(review_id)
+        record = self.reviews.get(key)
+        if record is None:
+            return None
+        repo = self.repositories.get(str(record.get("repository_id", ""))) or {}
+        findings = [
+            {
+                "id": row["id"],
+                "file_path": row["file_path"],
+                "line_start": row["line_start"],
+                "line_end": row["line_end"],
+                "category": row["category"],
+                "severity": row["severity"],
+                "confidence": row["confidence"],
+                "title": row["title"],
+                "description": row["description"],
+                "suggested_fix": row["suggested_fix"],
+                "evidence": dict(row["evidence"]),
+                "arum_utility": row.get("arum_utility"),
+            }
+            for row in self.findings
+            if row["review_id"] == key
+            and row["publication_status"] == FindingStatus.SCHEDULED.value
+        ]
+        findings.sort(key=lambda item: (-(item["arum_utility"] or 0.0), item["id"]))
+        return {
+            "review_id": str(review_id),
+            "head_sha": record.get("head_sha") or "",
+            "pr_number": record.get("pr_number"),
+            "pr_title": record.get("pr_title") or "",
+            "repository_full_name": (
+                repo.get("full_name") or record.get("repository_full_name") or ""
+            ),
+            "findings": findings,
+        }
+
+    async def mark_findings_published(
+        self,
+        review_id: object,
+        updates: Sequence[tuple[str, int | None]],
+    ) -> None:
+        key = str(review_id)
+        for finding_id, github_comment_id in updates:
+            for row in self.findings:
+                if row["id"] == finding_id and row["review_id"] == key:
+                    row["publication_status"] = FindingStatus.PUBLISHED.value
+                    row["github_comment_id"] = github_comment_id
+                    break
+
+    async def mark_review_published(
+        self,
+        review_id: object,
+        *,
+        github_review_id: int | None,
+        published_at: datetime,
+    ) -> None:
+        key = str(review_id)
+        record = self.reviews.get(key)
+        if record is None:
+            return
+        record["github_review_id"] = github_review_id
+        record["published_at"] = published_at.isoformat()
+        await self.transition(key, ReviewStatus.PUBLISHED, completed_at=published_at)
+        notes = record.setdefault("supervisor_notes", [])
+        notes.append("publisher: PR review posted to GitHub.")
 
     async def get_repository_memory(
         self, repository_id: object
@@ -1418,6 +1611,210 @@ class SqlOrchestratorStore:
                     )
                     .values(publication_status=FindingStatus.SUPPRESSED)
                 )
+
+    # --- Publication layer (PUBLISH step, docs/ARCHITECTURE.md §4.5) -----------
+
+    async def list_reviews_pending_publication(
+        self, *, limit: int, claim_stale_before: datetime
+    ) -> list[str]:
+        async with self._session_factory() as session:
+            rows = (
+                await session.execute(
+                    select(Review.id)
+                    .where(
+                        or_(
+                            Review.status.in_(
+                                [ReviewStatus.DECIDING, ReviewStatus.ITERATING]
+                            ),
+                            and_(
+                                Review.status == ReviewStatus.PUBLISHING,
+                                Review.updated_at <= claim_stale_before,
+                            ),
+                        )
+                    )
+                    .order_by(
+                        Review.priority_score.desc().nullslast(), Review.id.asc()
+                    )
+                    .limit(limit)
+                )
+            ).all()
+            return [str(row[0]) for row in rows]
+
+    async def claim_review_for_publication(
+        self, review_id: object, *, claim_stale_before: datetime
+    ) -> bool:
+        rid = uuid.UUID(str(review_id))
+        now = utc_now()
+        async with self._session_factory() as session, session.begin():
+            review = await session.get(Review, rid)
+            if review is None:
+                return False
+            status = review.status
+            allowed = {
+                ReviewStatus.DECIDING,
+                ReviewStatus.ITERATING,
+                ReviewStatus.PUBLISHING,
+            }
+            if status not in allowed:
+                return False
+            if (
+                status == ReviewStatus.PUBLISHING
+                and (
+                    review.updated_at is None
+                    or review.updated_at > claim_stale_before
+                )
+            ):
+                return False
+            result = await session.execute(
+                sa_update(Review)
+                .where(Review.id == rid, Review.status == status)
+                .values(
+                    status=ReviewStatus.PUBLISHING,
+                    updated_at=now,
+                    status_history=func.coalesce(
+                        Review.status_history,
+                        cast(sa_text("'[]'::jsonb"), JSONB),
+                    ).op("||")(
+                        func.jsonb_build_array(
+                            func.jsonb_build_object(
+                                "status",
+                                ReviewStatus.PUBLISHING.value,
+                                "from",
+                                cast(Review.status, sa_text("text")),
+                                "at",
+                                now.isoformat(),
+                            )
+                        )
+                    ),
+                )
+                .returning(Review.id)
+            )
+            return result.scalar_one_or_none() is not None
+
+    async def release_review_from_publication(self, review_id: object) -> None:
+        rid = uuid.UUID(str(review_id))
+        now = utc_now()
+        async with self._session_factory() as session, session.begin():
+            review = await session.get(Review, rid)
+            if review is None or review.status is not ReviewStatus.PUBLISHING:
+                return
+            prev = review.status
+            review.status = ReviewStatus.DECIDING
+            review.updated_at = now
+            history = list(review.status_history or [])
+            history.append(
+                {
+                    "status": ReviewStatus.DECIDING.value,
+                    "from": prev.value,
+                    "at": now.isoformat(),
+                }
+            )
+            review.status_history = history
+
+    async def publication_payload(self, review_id: object) -> dict[str, Any] | None:
+        rid = uuid.UUID(str(review_id))
+        async with self._session_factory() as session:
+            review = await session.get(Review, rid)
+            if review is None:
+                return None
+            pull_request = await session.get(PullRequest, review.pull_request_id)
+            repository = await session.get(Repository, review.repository_id)
+            if pull_request is None or repository is None:
+                return None
+            findings = (
+                (
+                    await session.execute(
+                        select(Finding)
+                        .where(
+                            Finding.review_id == rid,
+                            Finding.publication_status == FindingStatus.SCHEDULED,
+                        )
+                        .order_by(
+                            Finding.arum_utility.desc().nullslast(), Finding.id.asc()
+                        )
+                    )
+                )
+                .scalars()
+                .all()
+            )
+            return {
+                "review_id": str(review_id),
+                "head_sha": pull_request.head_sha,
+                "pr_number": pull_request.number,
+                "pr_title": pull_request.title,
+                "repository_full_name": repository.full_name,
+                "findings": [
+                    {
+                        "id": str(finding.id),
+                        "file_path": finding.file_path,
+                        "line_start": finding.line_start,
+                        "line_end": finding.line_end,
+                        "category": finding.category,
+                        "severity": finding.severity.value,
+                        "confidence": float(finding.confidence),
+                        "title": finding.title,
+                        "description": finding.description,
+                        "suggested_fix": finding.suggested_fix,
+                        "evidence": dict(finding.evidence or {}),
+                        "arum_utility": (
+                            float(finding.arum_utility)
+                            if finding.arum_utility is not None
+                            else None
+                        ),
+                    }
+                    for finding in findings
+                ],
+            }
+
+    async def mark_findings_published(
+        self,
+        review_id: object,
+        updates: Sequence[tuple[str, int | None]],
+    ) -> None:
+        rid = uuid.UUID(str(review_id))
+        async with self._session_factory() as session, session.begin():
+            for finding_id, github_comment_id in updates:
+                await session.execute(
+                    sa_update(Finding)
+                    .where(
+                        Finding.id == uuid.UUID(finding_id),
+                        Finding.review_id == rid,
+                    )
+                    .values(
+                        publication_status=FindingStatus.PUBLISHED,
+                        github_comment_id=github_comment_id,
+                    )
+                )
+
+    async def mark_review_published(
+        self,
+        review_id: object,
+        *,
+        github_review_id: int | None,
+        published_at: datetime,
+    ) -> None:
+        rid = uuid.UUID(str(review_id))
+        async with self._session_factory() as session, session.begin():
+            review = await session.get(Review, rid)
+            if review is None:
+                return
+            review.github_review_id = github_review_id
+            review.published_at = published_at
+            review.completed_at = published_at
+            prev = review.status
+            review.status = ReviewStatus.PUBLISHED
+            history = list(review.status_history or [])
+            history.append(
+                {
+                    "status": ReviewStatus.PUBLISHED.value,
+                    "from": prev.value if prev else None,
+                    "at": published_at.isoformat(),
+                }
+            )
+            review.status_history = history
+            notes = list(review.supervisor_notes or [])
+            notes.append("publisher: PR review posted to GitHub.")
+            review.supervisor_notes = notes
 
     async def get_repository_memory(
         self, repository_id: object

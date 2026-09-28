@@ -42,6 +42,12 @@ async def execute_orchestration_core(
         scope_data = await build_scope_data_for_review(uuid.UUID(review_id))
     scope = AgentScope.from_dict(scope_data)
     cfg = get_settings()
+    if store is None:
+        # Production seam: persist the run (reviews/findings/iterations) to
+        # PostgreSQL so the PUBLISH step (Sql store) can pick the results up.
+        from app.orchestrator.persistence import SqlOrchestratorStore
+
+        store = SqlOrchestratorStore()
     trace = (
         FileDecisionTrace(cfg.arum_decision_log_path)
         if cfg.arum_decision_log_path

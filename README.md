@@ -71,10 +71,10 @@ GitHub PR (webhook event)
     5. Adaptive review budget + safety gates (critical findings never silenced)
         |
         v
-  DECIDING checkpoint  (publication to GitHub arrives in a later phase)
+  DECIDING checkpoint  ->  publisher_queue  ->  GitHub Publisher (posts review + inline comments)
         |
         v
-  Developer feedback  -> repository memory (decay) -> RAG -> weight learning
+  PUBLISHED  ->  Developer feedback  ->  repository memory (decay)  ->  RAG  ->  weight learning
         |
         v
   Next review  -> iterative re-review of changed regions only
@@ -94,6 +94,7 @@ Full details: `docs/ARCHITECTURE.md`.
 - Cross-agent semantic redundancy detection (embeddings + cosine + proximity)
 - ARUM with eight dimensional features, versioned weights, deterministic ranking
 - Adaptive review budget controller with non-negotiable safety gates
+- **GitHub Publisher**: posts ARUM-selected findings as a PR review with inline comments (idempotent, claim-based, degrades off-diff findings to review body)
 - Developer feedback loop (feedback and "code changed" kept conceptually separate)
 - Repository-specific adaptive memory with temporal decay
 - pgvector RAG over historical findings, standards, and resolutions
@@ -184,6 +185,12 @@ silently cut):
   webhook / pipeline test seams. **Part 2** (worker-crash / restarted-in-flight
   scenario) authored as a live-gated self-skip suite; its execution and the
   broker-transport run need the Phase 18 stack.
+- **Publisher (component J) done**: `backend/app/publisher/` — claim-based
+  idempotent publication of ARUM-selected findings as a GitHub PR review with
+  inline comments; off-diff findings degrade to the review body; transient
+  errors release the claim for retry, permanent errors dead-letter. Celery
+  tasks on `publisher_queue` with bounded retries + backoff. 25 publisher
+  tests (12 service + 9 task + 4 integration).
 - **Phase 17 part 1** done: reproducible experiment harness (`app/experiments` +
   `experiments/`) with label pre-processing, B1–B5 + A1–A6 ablation modes over
   the real `app.adaptive` machinery, and 39 harness tests. **Part 2** in
@@ -205,9 +212,10 @@ VERIFICATION-ONLY footnote (PNGs/CSVs gitignored). The `github-codereview`
 posting, and experimental numbers that have not been produced are labelled as
 upcoming or "Results pending experimental validation".
 
-Suite today: **490 passed / 11 skipped** (10 PostgreSQL, 1 PostgreSQL+Redis —
-both lanes self-skip when the services are unreachable), ruff/mypy clean, 84%
-line coverage over `backend/app`. See `docs/TESTING.md`.
+Suite today: **560 passed / 20 skipped** (10 PostgreSQL, 1 PostgreSQL+Redis,
+9 PostgreSQL+Redis+Docker — all lanes self-skip when the services are
+unreachable), ruff/mypy clean, 84% line coverage over `backend/app`. See
+`docs/TESTING.md`.
 
 ---
 

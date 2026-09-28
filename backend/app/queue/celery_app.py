@@ -32,6 +32,8 @@ TASK_ROUTES = {
     "queue.pop_and_stage": {"queue": QUEUES["default"]},
     "agents.run_agent": {"queue": QUEUES["review_task"]},
     "orchestrator.run_review": {"queue": QUEUES["review_task"]},
+    "publisher.publish_review": {"queue": QUEUES["publisher"]},
+    "publisher.dequeue_pending": {"queue": QUEUES["default"]},
 }
 
 
@@ -44,6 +46,7 @@ def create_celery(settings: Settings | None = None) -> Celery:
             "app.queue.tasks",
             "app.queue.agent_tasks",
             "app.orchestrator.tasks",
+            "app.publisher.tasks",
         ],
     )
     app.conf.update(
@@ -64,6 +67,12 @@ def create_celery(settings: Settings | None = None) -> Celery:
         # beat only starts this when invoked with ``celery beat``.
         "pop-and-stage": {
             "task": "queue.pop_and_stage",
+            "schedule": cfg.scheduler_interval_seconds,
+        },
+        # Publisher scan: hand PUBLISH-ready reviews to publisher.publish_review.
+        # Claiming in the worker keeps the scan cheap (top-N id query only).
+        "publisher-dequeue-pending": {
+            "task": "publisher.dequeue_pending",
             "schedule": cfg.scheduler_interval_seconds,
         },
     }

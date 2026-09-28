@@ -39,7 +39,7 @@ posting remain explicitly pending — §4.5).
 | G | Redundancy Detection Layer | Semantic grouping of duplicate findings |
 | H | Adaptive Review Utility Model (ARUM) | Scores and ranks findings for publication |
 | I | Review Budget Controller | Caps published findings per risk class, honours safety gates |
-| J | GitHub Review Publisher | Writes review comments adhering to diff line anchors + rate limits — **pending (later phase); findings today are selected and scheduled, never posted** |
+| J | GitHub Review Publisher | Posts ARUM-selected findings as a PR review with inline comments; claim-based idempotent; off-diff findings degrade to review body |
 | K | Developer Feedback Collector | Captures developer outcomes from PR activity and API |
 | L | Repository-Specific Review Memory | Per-repo historical aggregates, standards, preferences |
 | M | RAG Retrieval System | pgvector retrieval of similar findings/decisions/standards |
@@ -131,15 +131,17 @@ States (persisted on the `review` row):
 
 ```text
 RECEIVED → QUEUED → PROCESSING
-     → AGENTS_RUNNING → CONSOLIDATING → DECIDING → PUBLISHED*
-     → WAITING_FOR_FEEDBACK → ITERATING → DECIDING → PUBLISHED* (final)
+     → AGENTS_RUNNING → CONSOLIDATING → DECIDING → PUBLISHING → PUBLISHED
+     → WAITING_FOR_FEEDBACK → ITERATING → DECIDING → PUBLISHING → PUBLISHED (final)
 RECEIVED/QUEUED/etc → FAILED (with retry) → CANCELLED
-
-* PUBLISHED is the later-phase target of the PUBLISH step (component J). The
-  implemented graph terminates on the DECIDING checkpoint (selection recorded,
-  publication to GitHub pending) or ITERATING for settled rounds; nothing marks
-  a review PUBLISHED today.
 ```
+
+The PUBLISH step (component J) is implemented: the publisher claims a
+DECIDING/ITERATING review (atomic `claim_review_for_publication`), posts the
+ARUM-selected findings as a GitHub PR review with inline comments, then marks
+the review PUBLISHED and its findings PUBLISHED. Transient errors release the
+claim back to DECIDING for retry; permanent errors dead-letter. Off-diff
+findings degrade to the review body instead of being lost.
 
 Transitions are enforced by the orchestrator; every state change is time-stamped.
 
@@ -165,11 +167,14 @@ Transitions are enforced by the orchestrator; every state change is time-stamped
    findings are ranked.
 4. **Budget (I)**: up to N findings are selected based on PR risk class and ARUM rank,
    honouring safety gates (critical/high-confidence findings protected).
-5. **Checkpoint, not publication**: the review lands on `DECIDING` with selected
-   representatives marked `publication_status=scheduled` and suppressed/truncated
-   findings marked `suppressed`. The **PUBLISH step (J)** that posts GitHub review
-   comments is a later phase and is never simulated — nothing sets `PUBLISHED` for a
-   review until that step exists (see `docs/ROADMAP.md`).
+5. **Publication (PUBLISH step, J)**: the review lands on `DECIDING` with selected
+   representatives marked `publication_status=scheduled`. The publisher
+   (`backend/app/publisher/`) claims the review atomically, posts the scheduled
+   findings as a GitHub PR review with inline comments (off-diff findings degrade
+   to the review body), then marks the review `PUBLISHED` and its findings
+   `PUBLISHED` with their GitHub comment ids. Transient errors release the claim
+   back to `DECIDING` for retry; permanent errors dead-letter. The beat scan
+   (`publisher.dequeue_pending`) hands pending reviews to `publisher_queue`.
 
 ### 4.6 Feedback capture
 

@@ -8,6 +8,7 @@ from typing import Any
 
 from pgvector.sqlalchemy import Vector
 from sqlalchemy import (
+    BigInteger,
     DateTime,
     Enum,
     ForeignKey,
@@ -105,6 +106,8 @@ class Finding(Base):
         )
     )
     feedback_labelled: Mapped[bool] = mapped_column(default=False, nullable=False)
+    github_comment_id: Mapped[int | None] = mapped_column(BigInteger)
+    github_review_id: Mapped[int | None] = mapped_column(BigInteger)
     temporal_weight: Mapped[float] = mapped_column(
         Numeric(6, 4), default=1.0, nullable=False
     )

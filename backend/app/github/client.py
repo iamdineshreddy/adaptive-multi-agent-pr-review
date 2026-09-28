@@ -1,8 +1,10 @@
-"""GitHub REST client (FR-1.3).
+"""GitHub REST client (FR-1.3 + PUBLISH step).
 
-Fetches PR metadata, changed files, diffs, and commits so the ingestion worker can
-feed diff slices to agents (docs/ARCHITECTURE.md §4.4, ROADMAP Phase 3 scope note).
-Auth uses the configured PAT/installation token; secrets never enter logs.
+Reads: fetches PR metadata, changed files, diffs, and commits so the ingestion
+worker can feed diff slices to agents (docs/ARCHITECTURE.md §4.4). Writes: the
+publisher posts selected findings back to the PR as a COMMENT review with inline
+comments (docs/ARCHITECTURE.md §4.5) — POST support added with the publication
+layer. Auth uses the configured PAT/installation token; secrets never enter logs.
 
 Error model: transient conditions (timeouts, 429, 5xx) raise ``GitHubApiError``
 with ``retryable=True``; auth/not-found/validation failures are permanent. The
@@ -15,7 +17,13 @@ from typing import Any
 
 import httpx
 
-from app.github.schemas import ChangedFile, CommitInfo, PullRequestDetail
+from app.github.schemas import (
+    ChangedFile,
+    CommitInfo,
+    PullRequestDetail,
+    PullRequestReviewResult,
+    PullRequestReviewWrite,
+)
 
 _RETRYABLE_STATUS_CODES = {408, 425, 429}
 _MAX_FILES_PER_PAGE = 300
@@ -105,12 +113,71 @@ class GitHubClient:
             )
         return commits
 
+    async def create_pull_request_review(
+        self,
+        owner: str,
+        repo: str,
+        number: int,
+        payload: PullRequestReviewWrite,
+    ) -> PullRequestReviewResult:
+        """Create a pull-request *review* (event COMMENT) with inline comments.
+
+        The publisher uses this to post its selected findings back to the PR in
+        one request (docs/QUEUE.md §5 keeps comment posting at-most-once per
+        finding). Individual comments that GitHub rejects as off-diff are handled
+        by the caller via ``all_failed`` / ``declined`` responses.
+        """
+        body = {
+            "commit_id": payload.commit_id,
+            "event": payload.event,
+            "body": payload.body,
+            "comments": [
+                {
+                    "path": comment.path,
+                    "line": comment.line,
+                    "side": comment.side,
+                    "body": comment.body,
+                }
+                for comment in payload.comments
+            ],
+        }
+        data = await self._post(f"/repos/{owner}/{repo}/pulls/{number}/reviews", body)
+        return PullRequestReviewResult(
+            id=int(data["id"]),
+            url=data.get("html_url"),
+            state=str(data.get("state", "")),
+            comments=[
+                {
+                    "id": int(item["id"]),
+                    "path": str(item.get("path", "")),
+                    "line": item.get("line"),
+                    "body": str(item.get("body", "")),
+                }
+                for item in (data.get("comments") or [])
+            ],
+        )
+
     async def aclose(self) -> None:
         await self._client.aclose()
 
     async def _get(self, path: str, *, params: dict[str, Any] | None = None) -> Any:
+        return await self._request("GET", path, params=params)
+
+    async def _post(self, path: str, json: dict[str, Any]) -> Any:
+        return await self._request("POST", path, json=json)
+
+    async def _request(
+        self,
+        method: str,
+        path: str,
+        *,
+        params: dict[str, Any] | None = None,
+        json: dict[str, Any] | None = None,
+    ) -> Any:
         try:
-            response = await self._client.get(path, params=params)
+            response = await self._client.request(
+                method, path, params=params, json=json
+            )
         except httpx.TimeoutException as exc:
             raise GitHubApiError(0, "request timed out", retryable=True) from exc
         except httpx.TransportError as exc:
