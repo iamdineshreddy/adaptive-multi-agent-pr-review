@@ -184,11 +184,10 @@ def fit_lightgbm(
 
 def lightgbm_predict(booster: object, features: Sequence[float]) -> float:
     """Publish probability from a fitted lightGBM booster."""
-    lgb = _lightgbm()
     import numpy as np
 
     row = np.asarray([list(features)], dtype=np.float64)
-    return float(lgb.predict(booster, row)[0])
+    return float(booster.predict(row)[0])
 
 
 def evaluate(

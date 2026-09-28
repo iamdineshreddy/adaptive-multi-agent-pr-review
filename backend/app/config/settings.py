@@ -55,7 +55,7 @@ class Settings(BaseSettings):
     redis_url: str = "redis://localhost:6379/0"
 
     # --- LLM ---------------------------------------------------------------
-    llm_provider: str = "openai"
+    llm_provider: str = "mock"  # mock keeps compose/offline runs working out of the box
     llm_model_default: str = "gpt-4o-mini"
     llm_embedding_model: str = "text-embedding-3-small"
     openai_api_key: str = ""
@@ -127,6 +127,13 @@ class Settings(BaseSettings):
 
     # --- Iterative review engine (Phase 12, FR-6) ----------------------------
     iteration_line_gap: int = 0  # tolerance (lines) when classifying stale findings
+
+    # --- Publisher (PUBLISH step, docs/ARCHITECTURE.md §4.5, component J) ----
+    # A PUBLISHING row is reclaimed only after this long (worker-crash window);
+    # the scan treats it as stale so the next beat reposts instead of hanging.
+    publisher_claim_stale_seconds: int = 300
+    # Inline comments per review; GitHub caps the inline set per review.
+    publisher_max_comments_per_review: int = 20
 
     # --- Observability -------------------------------------------------------
     langfuse_public_key: str = ""
