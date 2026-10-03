@@ -300,7 +300,7 @@ async def test_iteration_publisher_new_findings(settings: Settings) -> None:
 
 
 async def test_full_iteration_flow(settings: Settings) -> None:
-    """Full flow: first review → publish → synchronize → targeted re-review → publish."""
+    """Full flow: review -> publish -> sync -> re-review -> publish."""
     github_calls: list[dict] = []
 
     def handler(request: httpx.Request) -> httpx.Response:

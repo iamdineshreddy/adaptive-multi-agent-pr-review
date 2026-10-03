@@ -175,6 +175,8 @@ Transitions are enforced by the orchestrator; every state change is time-stamped
    `PUBLISHED` with their GitHub comment ids. Transient errors release the claim
    back to `DECIDING` for retry; permanent errors dead-letter. The beat scan
    (`publisher.dequeue_pending`) hands pending reviews to `publisher_queue`.
+   **Status: implemented and tested offline** (25 publisher tests). Live GitHub
+   E2E requires credentials and a test repository.
 
 ### 4.6 Feedback capture
 

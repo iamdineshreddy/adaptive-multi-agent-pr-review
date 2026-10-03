@@ -189,8 +189,8 @@ silently cut):
   idempotent publication of ARUM-selected findings as a GitHub PR review with
   inline comments; off-diff findings degrade to the review body; transient
   errors release the claim for retry, permanent errors dead-letter. Celery
-  tasks on `publisher_queue` with bounded retries + backoff. 25 publisher
-  tests (12 service + 9 task + 4 integration).
+  tasks on `publisher_queue` with bounded retries + backoff. 29 publisher
+  tests (12 service + 9 task + 4 integration + 4 iteration).
 - **Phase 17 part 1** done: reproducible experiment harness (`app/experiments` +
   `experiments/`) with label pre-processing, B1–B5 + A1–A6 ablation modes over
   the real `app.adaptive` machinery, and 39 harness tests. **Part 2** in
@@ -208,11 +208,12 @@ VERIFICATION-ONLY footnote (PNGs/CSVs gitignored). The `github-codereview`
 - **Phase 19** done: this README, `docs/ARCHITECTURE.md` refinement,
   `docs/RESEARCH.md`, `docs/EXPERIMENTS.md` finalisation.
 
-**Nothing not implemented is claimed.** References to publication, GitHub comment
-posting, and experimental numbers that have not been produced are labelled as
-upcoming or "Results pending experimental validation".
+**Nothing not implemented is claimed.** References to experimental numbers
+that have not been produced are labelled as "Results pending experimental
+validation". Live Docker/GitHub E2E validation requires infrastructure not
+available in this environment.
 
-Suite today: **560 passed / 20 skipped** (10 PostgreSQL, 1 PostgreSQL+Redis,
+Suite today: **564 passed / 20 skipped** (10 PostgreSQL, 1 PostgreSQL+Redis,
 9 PostgreSQL+Redis+Docker — all lanes self-skip when the services are
 unreachable), ruff/mypy clean, 84% line coverage over `backend/app`. See
 `docs/TESTING.md`.
