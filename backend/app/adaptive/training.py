@@ -182,7 +182,7 @@ def fit_lightgbm(
     return booster
 
 
-def lightgbm_predict(booster: object, features: Sequence[float]) -> float:
+def lightgbm_predict(booster: Any, features: Sequence[float]) -> float:
     """Publish probability from a fitted lightGBM booster."""
     import numpy as np
 

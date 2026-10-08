@@ -15,7 +15,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from typing import Any, Protocol
 
-from sqlalchemy import and_, cast, func, or_, select
+from sqlalchemy import TEXT, and_, cast, func, or_, select
 from sqlalchemy import text as sa_text
 from sqlalchemy import update as sa_update
 from sqlalchemy.dialects.postgresql import JSONB
@@ -99,7 +99,7 @@ def utc_now() -> datetime:
 def _as_float(value: object) -> float | None:
     """Best-effort numeric coercion for memory-store bookkeeping rows."""
     try:
-        return None if value is None else float(value)
+        return None if value is None else float(value)  # type: ignore[arg-type]
     except (TypeError, ValueError):
         return None
 
@@ -775,10 +775,7 @@ class MemoryOrchestratorStore:
             return False
         if status == ReviewStatus.PUBLISHING.value:
             claimed = record.get("claimed_at")
-            if (
-                claimed is None
-                or datetime.fromisoformat(claimed) > claim_stale_before
-            ):
+            if claimed is None or datetime.fromisoformat(claimed) > claim_stale_before:
                 return False
         now = utc_now()
         record["status"] = ReviewStatus.PUBLISHING.value
@@ -795,10 +792,7 @@ class MemoryOrchestratorStore:
     async def release_review_from_publication(self, review_id: object) -> None:
         key = str(review_id)
         record = self.reviews.get(key)
-        if (
-            record is None
-            or record.get("status") != ReviewStatus.PUBLISHING.value
-        ):
+        if record is None or record.get("status") != ReviewStatus.PUBLISHING.value:
             return
         now = utc_now()
         record["status"] = ReviewStatus.DECIDING.value
@@ -1632,9 +1626,7 @@ class SqlOrchestratorStore:
                             ),
                         )
                     )
-                    .order_by(
-                        Review.priority_score.desc().nullslast(), Review.id.asc()
-                    )
+                    .order_by(Review.priority_score.desc().nullslast(), Review.id.asc())
                     .limit(limit)
                 )
             ).all()
@@ -1657,12 +1649,8 @@ class SqlOrchestratorStore:
             }
             if status not in allowed:
                 return False
-            if (
-                status == ReviewStatus.PUBLISHING
-                and (
-                    review.updated_at is None
-                    or review.updated_at > claim_stale_before
-                )
+            if status == ReviewStatus.PUBLISHING and (
+                review.updated_at is None or review.updated_at > claim_stale_before
             ):
                 return False
             result = await session.execute(
@@ -1680,7 +1668,7 @@ class SqlOrchestratorStore:
                                 "status",
                                 ReviewStatus.PUBLISHING.value,
                                 "from",
-                                cast(Review.status, sa_text("text")),
+                                cast(Review.status, TEXT),
                                 "at",
                                 now.isoformat(),
                             )

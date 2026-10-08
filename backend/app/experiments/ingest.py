@@ -166,9 +166,7 @@ def _map_record(
     overlay: Mapping[str, Mapping[str, Any]],
 ) -> tuple[dict[str, Any], str | None, str]:
     missing = [
-        name
-        for name in REQUIRED_ARCHIVE_FIELDS
-        if _archive_field(entry, name) is None
+        name for name in REQUIRED_ARCHIVE_FIELDS if _archive_field(entry, name) is None
     ]
     if missing:
         raise IngestError(
@@ -377,7 +375,7 @@ def _content_hash(review_id: str, entry: Mapping[str, Any]) -> str:
     return hashlib.sha256(raw.encode("utf-8")).hexdigest()
 
 
-def _optional_int(value: object, *, default: int) -> int:
+def _optional_int(value: object, *, default: int | None = None) -> int | None:
     if value is None or value == "":
         return default
     return int(str(value))

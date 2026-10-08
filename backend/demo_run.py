@@ -1,7 +1,8 @@
 """Demonstration: full review pipeline from webhook to published GitHub review.
 
 Runs the complete flow using the Memory store and mock GitHub client:
-webhook → priority scoring → orchestrator → agents → consolidation → ARUM → publisher → GitHub
+webhook → priority scoring → orchestrator → agents → consolidation → ARUM →
+publisher → GitHub
 
 Usage: python demo_run.py
 """
@@ -11,7 +12,6 @@ from __future__ import annotations
 import asyncio
 import json
 import uuid
-from datetime import timedelta
 
 import httpx
 
@@ -19,7 +19,7 @@ from app.agents.contract import AgentScope, ChangeKind, FileSlice
 from app.config.settings import Settings
 from app.github.client import GitHubClient
 from app.models.enums import FindingStatus, ReviewStatus
-from app.orchestrator.persistence import MemoryOrchestratorStore, utc_now
+from app.orchestrator.persistence import MemoryOrchestratorStore
 from app.orchestrator.runners import RunnerResult
 from app.orchestrator.service import run_review
 from app.publisher.service import publish_review
@@ -67,11 +67,11 @@ def _scope() -> AgentScope:
                 patch=(
                     "@@ -1,3 +1,8 @@\n"
                     " def get_user(user_id):\n"
-                    "+    query = f\"SELECT * FROM users WHERE id = {user_id}\"\n"
+                    '+    query = f"SELECT * FROM users WHERE id = {user_id}"\n'
                     "+    return db.execute(query)\n"
                     "+\n"
                     " def get_orders(user_id):\n"
-                    "+    query = f\"SELECT * FROM orders WHERE user_id = {user_id}\"\n"
+                    '+    query = f"SELECT * FROM orders WHERE user_id = {user_id}"\n'
                     "+    return db.execute(query)"
                 ),
                 new_start=1,
@@ -93,66 +93,95 @@ class _MockRunner:
         for file_slice in scope.changed_files:
             if file_slice.file_path == "app/auth.py":
                 if agent_key == "security":
-                    findings.append({
-                        "file_path": "app/auth.py",
-                        "line_start": 3,
-                        "line_end": 3,
-                        "category": "security/session",
-                        "severity": "HIGH",
-                        "confidence": 0.85,
-                        "title": "Session token stored in client-side session",
-                        "description": "The authentication token is stored in a client-side session without HttpOnly flag.",
-                        "evidence": {"snippet": "session['token'] = token"},
-                        "suggested_fix": "Set session cookies with HttpOnly and Secure flags.",
-                        "reason_summary": "Token accessible via XSS.",
-                        "related_categories": [],
-                    })
+                    findings.append(
+                        {
+                            "file_path": "app/auth.py",
+                            "line_start": 3,
+                            "line_end": 3,
+                            "category": "security/session",
+                            "severity": "HIGH",
+                            "confidence": 0.85,
+                            "title": "Session token stored in client-side session",
+                            "description": (
+                                "The authentication token is stored in a "
+                                "client-side session without HttpOnly flag."
+                            ),
+                            "evidence": {"snippet": "session['token'] = token"},
+                            "suggested_fix": (
+                                "Set session cookies with HttpOnly and Secure flags."
+                            ),
+                            "reason_summary": "Token accessible via XSS.",
+                            "related_categories": [],
+                        }
+                    )
                 elif agent_key == "quality":
-                    findings.append({
-                        "file_path": "app/auth.py",
-                        "line_start": 1,
-                        "line_end": 12,
-                        "category": "quality/maintainability",
-                        "severity": "LOW",
-                        "confidence": 0.6,
-                        "title": "Login function lacks input validation",
-                        "description": "No validation on user input before processing.",
-                        "evidence": {"snippet": "def login():"},
-                        "suggested_fix": "Add input validation for user credentials.",
-                        "reason_summary": "Missing input validation.",
-                        "related_categories": [],
-                    })
+                    findings.append(
+                        {
+                            "file_path": "app/auth.py",
+                            "line_start": 1,
+                            "line_end": 12,
+                            "category": "quality/maintainability",
+                            "severity": "LOW",
+                            "confidence": 0.6,
+                            "title": "Login function lacks input validation",
+                            "description": (
+                                "No validation on user input before processing."
+                            ),
+                            "evidence": {"snippet": "def login():"},
+                            "suggested_fix": (
+                                "Add input validation for user credentials."
+                            ),
+                            "reason_summary": "Missing input validation.",
+                            "related_categories": [],
+                        }
+                    )
             elif file_slice.file_path == "app/queries.py":
                 if agent_key == "security":
-                    findings.append({
-                        "file_path": "app/queries.py",
-                        "line_start": 2,
-                        "line_end": 2,
-                        "category": "security/sql-injection",
-                        "severity": "CRITICAL",
-                        "confidence": 0.95,
-                        "title": "SQL injection vulnerability",
-                        "description": "User input is directly interpolated into SQL query string.",
-                        "evidence": {"snippet": "f\"SELECT * FROM users WHERE id = {user_id}\""},
-                        "suggested_fix": "Use parameterized queries: db.execute('SELECT * FROM users WHERE id = %s', (user_id,))",
-                        "reason_summary": "Direct string interpolation in SQL.",
-                        "related_categories": [],
-                    })
+                    findings.append(
+                        {
+                            "file_path": "app/queries.py",
+                            "line_start": 2,
+                            "line_end": 2,
+                            "category": "security/sql-injection",
+                            "severity": "CRITICAL",
+                            "confidence": 0.95,
+                            "title": "SQL injection vulnerability",
+                            "description": (
+                                "User input is directly interpolated into "
+                                "SQL query string."
+                            ),
+                            "evidence": {
+                                "snippet": 'f"SELECT * FROM users WHERE id = {user_id}"'
+                            },
+                            "suggested_fix": (
+                                "Use parameterized queries: db.execute("
+                                "'SELECT * FROM users WHERE id = %s', (user_id,))"
+                            ),
+                            "reason_summary": "Direct string interpolation in SQL.",
+                            "related_categories": [],
+                        }
+                    )
                 elif agent_key == "performance":
-                    findings.append({
-                        "file_path": "app/queries.py",
-                        "line_start": 2,
-                        "line_end": 2,
-                        "category": "performance/query",
-                        "severity": "MEDIUM",
-                        "confidence": 0.7,
-                        "title": "Repeated query pattern",
-                        "description": "Similar query pattern repeated for different tables.",
-                        "evidence": {"snippet": "db.execute(query)"},
-                        "suggested_fix": "Consider a generic query helper function.",
-                        "reason_summary": "Code duplication in query patterns.",
-                        "related_categories": [],
-                    })
+                    findings.append(
+                        {
+                            "file_path": "app/queries.py",
+                            "line_start": 2,
+                            "line_end": 2,
+                            "category": "performance/query",
+                            "severity": "MEDIUM",
+                            "confidence": 0.7,
+                            "title": "Repeated query pattern",
+                            "description": (
+                                "Similar query pattern repeated for different tables."
+                            ),
+                            "evidence": {"snippet": "db.execute(query)"},
+                            "suggested_fix": (
+                                "Consider a generic query helper function."
+                            ),
+                            "reason_summary": "Code duplication in query patterns.",
+                            "related_categories": [],
+                        }
+                    )
         return RunnerResult(
             agent_key=agent_key,
             success=True,
@@ -228,7 +257,7 @@ async def main() -> None:
     # Step 2: Orchestrator runs agents
     _print_step(2, "ORCHESTRATOR — AGENT FAN-OUT")
     print(f"  Review ID: {REVIEW_ID}")
-    print(f"  Agents: security, quality, performance, architecture, standards")
+    print("  Agents: security, quality, performance, architecture, standards")
 
     # Ensure the review record has repository_id set (needed by publisher)
     store.reviews[str(REVIEW_ID)] = {
@@ -264,17 +293,20 @@ async def main() -> None:
     print(f"  Suppressed: {record.get('suppressed_count', 0)}")
 
     scheduled = [
-        f for f in store.findings
+        f
+        for f in store.findings
         if f["publication_status"] == FindingStatus.SCHEDULED.value
     ]
     suppressed = [
-        f for f in store.findings
+        f
+        for f in store.findings
         if f["publication_status"] == FindingStatus.SUPPRESSED.value
     ]
-    print(f"\n  Findings by status:")
+    print("\n  Findings by status:")
     print(f"    SCHEDULED: {len(scheduled)}")
     for f in scheduled:
-        print(f"      - [{f['severity']}] {f['title']} (utility: {f.get('arum_utility', 0):.3f})")
+        utility = f.get("arum_utility", 0)
+        print(f"      - [{f['severity']}] {f['title']} (utility: {utility:.3f})")
     print(f"    SUPPRESSED: {len(suppressed)}")
     for f in suppressed:
         print(f"      - [{f['severity']}] {f['title']}")
@@ -302,7 +334,8 @@ async def main() -> None:
     print(f"  Published at: {record.get('published_at')}")
 
     published = [
-        f for f in store.findings
+        f
+        for f in store.findings
         if f["publication_status"] == FindingStatus.PUBLISHED.value
     ]
     print(f"\n  Published findings: {len(published)}")

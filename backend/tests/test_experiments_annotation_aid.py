@@ -17,10 +17,7 @@ from pathlib import Path
 from app.experiments.ingest import annotation_key
 
 _AID = (
-    Path(__file__).resolve().parents[2]
-    / "experiments"
-    / "ingest"
-    / "annotation_aid.py"
+    Path(__file__).resolve().parents[2] / "experiments" / "ingest" / "annotation_aid.py"
 )
 _JUDGEMENT_FIELDS = (
     "file_path",
@@ -66,9 +63,7 @@ def _archive() -> list[dict[str, object]]:
 def _run(tmp_path: Path, archive: list[dict[str, object]], *extra: str) -> Path:
     tmp_path.mkdir(parents=True, exist_ok=True)
     src = tmp_path / "archive.jsonl"
-    src.write_text(
-        "\n".join(json.dumps(r) for r in archive), encoding="utf-8"
-    )
+    src.write_text("\n".join(json.dumps(r) for r in archive), encoding="utf-8")
     out_dir = tmp_path / "aid"
     result = subprocess.run(
         [

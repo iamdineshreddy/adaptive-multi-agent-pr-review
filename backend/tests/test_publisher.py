@@ -175,9 +175,7 @@ async def test_publish_orders_inline_comments_by_arum_utility(
             ),
         ]
     )
-    await publish_review(
-        store, _client(handler), REVIEW_ID, settings=settings
-    )
+    await publish_review(store, _client(handler), REVIEW_ID, settings=settings)
 
     assert len(paths) == 2
     # The publisher sorts by arum_utility desc: finding-1 (0.9) posts first.

@@ -126,6 +126,7 @@ class TestGitHubClient:
             assert request.method == "POST"
             assert request.url.path == "/repos/org/repo/pulls/12/reviews"
             import json
+
             payload = json.loads(request.content)
             assert payload["commit_id"] == "abc123"
             assert payload["event"] == "COMMENT"

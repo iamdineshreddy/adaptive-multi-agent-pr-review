@@ -1,4 +1,5 @@
 """Diagnose GitHub API access."""
+
 import os
 
 import httpx

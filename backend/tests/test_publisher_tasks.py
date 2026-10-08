@@ -116,9 +116,7 @@ class _TaskRetryError(Exception):
     """Sentinel raised by the fake ``self.retry`` when a retry is scheduled."""
 
 
-def _run_publish_task(
-    task: _FakeTask, review_id: str
-) -> dict[str, object]:
+def _run_publish_task(task: _FakeTask, review_id: str) -> dict[str, object]:
     """Invoke the task body with an injected fake task (bind semantics)."""
     impl = cast(
         Callable[[_FakeTask, str], dict[str, object]],
@@ -293,9 +291,7 @@ class TestDequeuePending:
         assert dispatched == []
 
 
-def _run_scan(
-    store: MemoryOrchestratorStore, dispatch: Callable
-) -> list[str]:
+def _run_scan(store: MemoryOrchestratorStore, dispatch: Callable) -> list[str]:
     """Invoke scan_and_dispatch with an injected store."""
     import asyncio
 
@@ -309,8 +305,7 @@ class TestBeatSchedule:
         schedule = celery_app.conf.beat_schedule
         assert "publisher-dequeue-pending" in schedule
         assert (
-            schedule["publisher-dequeue-pending"]["task"]
-            == "publisher.dequeue_pending"
+            schedule["publisher-dequeue-pending"]["task"] == "publisher.dequeue_pending"
         )
         assert schedule["publisher-dequeue-pending"]["schedule"] > 0
 

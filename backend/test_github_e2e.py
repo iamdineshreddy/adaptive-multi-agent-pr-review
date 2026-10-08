@@ -1,8 +1,8 @@
 """Real GitHub E2E test - verify token and check repo status."""
 
-import httpx
-import json
 import os
+
+import httpx
 
 TOKEN = os.environ["ADAPTIVE_GITHUB_PAT"]  # from .env / environment; never hardcode
 HEADERS = {
