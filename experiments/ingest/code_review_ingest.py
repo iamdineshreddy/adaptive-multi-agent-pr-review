@@ -1,11 +1,11 @@
 """Ingest a CodeReview (CodeRefinement) archive into the raw corpus (Phase 17 part 2).
 
 Mechanical fields are mapped from the archive; research fields
-(category/severity/confidence/reviewer) and outcome evidence come **only** from
-an annotation overlay keyed by the mechanical ``review_id`` (see
-``datasets/README.md`` for the protocol). Records the overlay does not fully
-cover are written to the excluded file with a machine-readable reason; nothing
-is inferred.
+(category/severity/confidence/reviewer/file_path) and outcome evidence come
+**only** from an annotation overlay keyed by the per-comment ``annotation_key``
+(see ``datasets/README.md`` for the protocol). Records the overlay does not
+fully cover are written to the excluded file with a machine-readable reason;
+nothing is inferred.
 
 Usage:
     python experiments/ingest/code_review_ingest.py archive.jsonl \\
@@ -42,7 +42,8 @@ def _main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--annotation",
         type=Path,
-        help="annotation overlay JSONL keyed by review_id (protocol in datasets/README.md)",
+        help="annotation overlay JSONL keyed by annotation_key "
+        "(protocol in datasets/README.md)",
     )
     parser.add_argument("--out", type=Path, default=Path("raw.jsonl"),
                         help="included raw JSONL (default: raw.jsonl)")
@@ -50,6 +51,16 @@ def _main(argv: list[str] | None = None) -> int:
                         help="excluded records JSONL (default: excluded.jsonl)")
     parser.add_argument("--manifest", type=Path, default=Path("manifest.json"),
                         help="ingest manifest JSON (default: manifest.json)")
+    parser.add_argument(
+        "--annotator",
+        help="who/what produced the overlay (methods provenance, recorded in "
+        "the manifest; e.g. 'llm:big-pickle' or a human id)",
+    )
+    parser.add_argument(
+        "--rubric",
+        help="path to the annotation rubric/guidelines file the overlay was "
+        "produced under (methods provenance)",
+    )
     args = parser.parse_args(argv)
 
     if not args.archive.is_file():
@@ -69,6 +80,12 @@ def _main(argv: list[str] | None = None) -> int:
     except IngestError as exc:
         raise SystemExit(f"ingest error: {exc}")
 
+    provenance: dict[str, Any] = {}
+    if args.annotator:
+        provenance["annotator"] = args.annotator
+    if args.rubric:
+        provenance["rubric"] = args.rubric
+
     write_ingest_outputs(
         records,
         out=args.out,
@@ -76,6 +93,7 @@ def _main(argv: list[str] | None = None) -> int:
         manifest=args.manifest,
         source_archive=str(args.archive),
         annotation_path=annotation_path,
+        annotation_provenance=provenance or None,
     )
 
     included = sum(1 for item in records if item.exclusion_reason is None)

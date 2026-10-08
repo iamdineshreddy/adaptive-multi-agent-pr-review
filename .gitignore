@@ -28,6 +28,7 @@ frontend/.vite/
 
 # --- Data / experiments (reproducible, not committed) -----------------------
 datasets/raw/
+datasets/annotation/
 experiments/results/*
 !experiments/results/.gitkeep
 *.sqlite3

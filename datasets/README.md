@@ -107,28 +107,46 @@ python experiments/ingest/code_review_ingest.py archive.jsonl \
     --out raw.jsonl --excluded excluded.jsonl --manifest manifest.json
 ```
 
-Mechanical mapping (from the archive, no interpretation): `review_id`
-(deterministic content hash, or the archive's `comment_id` when present),
-`comment`, `file_path`, `round`, `memory`, optional line numbers;
-`implemented_later` = the before/after pair differs; `is_review_comment` and
+Mechanical mapping (from the archive, no interpretation): `review_id` is
+**PR level** — `{repo}#{ghid}` (PR numbers are per repository, so the repo
+qualifier keeps grouping keys collision-free, and several comments of one PR
+share it, which is what lets `corpus._group_key` form multi-comment redundancy
+groups); `repo`, `comment`, `round`, `memory`, `implemented_later` = the
+before/after pair differs, `line_start`/`line_end` read from the old-side (`-`)
+range of the archive's `hunk` (evidence: marker-stripped `old` equals that side
+in 4,982/5,000 rows — `hunk` is the refinement change); `is_review_comment` and
 `related_to_feedback` are structural properties of the archive's review-driven
 triplets; **nothing is inferred about whether the change matches the comment**.
+Published archive field names (`ghid` / `comment` / `old` / `new`) and the raw
+schema's names (`pr_number` / `review_comment` / `code_before` / `code_after`)
+are both accepted (`ARCHIVE_ALIASES` in `app/experiments/ingest.py`).
 
-The archive supplies **no** `category` / `severity` / `confidence` /
-`reviewer`, and no suggestion-matching evidence beyond the changed pair. Those
-fields come **only** from an annotation overlay JSONL keyed by the mechanical
-`review_id`:
+Two identities exist on purpose. The overlay is keyed by the **per-comment**
+`annotation_key` (prefers the archive's `comment_id`, else a sha256 over
+`repo|ghid|ids[0]|comment`), mirrored into each record's
+`provenance.annotation_key` so pass 1 can emit the exact ids to annotate — one
+comment must not overwrite another's entry.
+
+The archive supplies **no** `file_path` (verified over all four Zenodo
+archives; the path was collected by the original authors but never released —
+`datasets/DATASET_MAPPING_PROPOSAL.md`) and **no** `category` / `severity` /
+`confidence` / `reviewer`. Those fields come **only** from an annotation
+overlay JSONL keyed by `annotation_key`:
 
 ```json
-{"review_id": "comment-101", "category": "quality/maintainability",
- "severity": "low", "confidence": 0.9, "reviewer": "annotator-id",
- "implementation": "verbatim", "suggested_fix": "Extract the base URL once."}
+{"review_id": "code-review:1f0c…", "file_path": "src/app.py",
+ "category": "quality/maintainability", "severity": "low", "confidence": 0.9,
+ "reviewer": "quality", "implementation": "verbatim",
+ "suggested_fix": "Extract the base URL once."}
 ```
 
-Overlay fields: `category` (ARUM agent-category taxonomy, docs/AGENTS.md),
-`severity`, `confidence` (annotator certainty in [0,1]), `reviewer`,
-`round`, `implementation` (`verbatim`|`partial`|`modified`), `explicit_outcome`,
-`actionable`, `suggested_fix`, `memory`. Protocol rules:
+Overlay fields: `file_path` (annotator resolves it from the PR view —
+`https://github.com/{repo}/pull/{ghid}` — never a placeholder), `category`
+(ARUM agent-category taxonomy, docs/AGENTS.md), `severity`, `confidence`
+(annotator certainty in [0,1]), `reviewer` (**agent key** from docs/AGENTS.md:
+which of the five agents should emit this finding), `round`, `implementation`
+(`verbatim`|`partial`|`modified`), `explicit_outcome`, `actionable`,
+`suggested_fix`, `memory`. Protocol rules:
 
 - `implementation` is recorded **only** when the annotator verified the
   comment's suggestion matches the changed code (the Auth.md evidence bar);
@@ -148,11 +166,36 @@ Overlay fields: `category` (ARUM agent-category taxonomy, docs/AGENTS.md),
   model).
 
 Two-pass flow: (1) ingest without `--annotation` → every record excluded as
-`annotation_required` with a stable `review_id`; (2) annotate those ids per the
-protocol above; (3) re-ingest with `--annotation` and ship `raw.jsonl` into
+`annotation_required`, carrying its per-comment `provenance.annotation_key`
+(the id to annotate) and `provenance.archive_ids`; (2) annotate those keys per
+the protocol above; (3) re-ingest with `--annotation` and ship `raw.jsonl` into
 `preprocess.py` → `run_all.py`. Bundled demo fixtures:
 `samples/code_review_archive_sample.jsonl` +
 `samples/code_review_annotation_sample.jsonl` (verification-only).
+
+Annotation aid (builds both artefacts of pass 1 in one step):
+
+```
+python experiments/ingest/annotation_aid.py datasets/raw/Code_Refinement/ref-test.jsonl \
+    --out-dir datasets/annotation --sample 500 --seed 0
+```
+
+It writes `sample.jsonl` (the seeded candidate pool), `annotation_required.jsonl`
+(one row per comment: id, repo, PR link, comment, hunk, before/after region,
+archive ids) and `annotation_draft.jsonl` (the overlay skeleton with **every**
+judgement field null — the aid prefills nothing), plus `aid_manifest.json`
+(source sha256, seed, mode, counts, integrity statement). Sampling is
+**PR-cluster** by default (`--sample-mode prs`): PR ids are shuffled with the
+seed and taken until `--sample` rows are collected, keeping every comment of a
+selected PR — otherwise multi-comment PRs (the only place redundancy groups can
+form) vanish from the sample. Outputs land in gitignored `datasets/annotation/`.
+
+Known, documented limitations of this archive (recorded so results cannot
+over-claim): every released triplet is followed by a later change **by
+construction** (Li et al. §3.3), so `implemented_later` is constant `True` and
+unannotated outcome is `changed_unclassified`/excluded, never IGNORED; and
+there is no review-round field, so all rows default to `round = 1`, which makes
+A5 identical to B5 by construction on this corpus (reported as such).
 
 ## Candidate supplementary datasets
 

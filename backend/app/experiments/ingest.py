@@ -3,23 +3,36 @@
 The Li et al. CodeReview archive (Zenodo 6900648, CC-BY-4.0 —
 ``datasets/README.md``) provides real review comments and the before/after pair
 from the code-change triplet, but **not** the research fields the pipeline
-requires (``category`` / ``severity`` / ``confidence`` / ``reviewer``) nor
-suggestion-matching implementation evidence. This module is the honest splice:
+requires (``category`` / ``severity`` / ``confidence`` / ``reviewer``) and it
+carries **no file path at all** (evidence: ``datasets/DATASET_MAPPING_PROPOSAL.md``).
+This module is the honest splice:
 
 - **Mechanical mapping** — derived from the archive without interpretation:
-  ``review_id`` (deterministic content hash), ``comment``, ``file_path``,
-  ``implemented_later`` (= the before/after pair differs), ``round``,
-  ``memory``, optional line numbers / suggested fix.
-- **Annotation overlay** — an optional JSONL keyed by the mechanical
-  ``review_id`` supplying the research fields and outcome evidence
-  (``implementation`` / ``explicit_outcome``) per the protocol in
-  ``datasets/README.md``. Nothing is invented here: any record the overlay does
-  not fully cover is **excluded** with a machine-readable reason, so the
-  labelled research corpus never contains annotation it did not really get.
+  ``review_id`` (PR level: ``{repo}#{pr_number}``), ``comment``,
+  ``implemented_later`` (= the before/after pair differs), line numbers read
+  from the hunk header when present, ``round``, ``memory``, optional suggested
+  fix. The published archive names (``ghid`` / ``comment`` / ``old`` / ``new``)
+  and the bundled smoke fixture's raw-schema names (``pr_number`` /
+  ``review_comment`` / ``code_before`` / ``code_after``) are both accepted —
+  see ``ARCHIVE_ALIASES`` — so neither corpus has to be rewritten.
+- **Annotation overlay** — a JSONL keyed by the **per-comment**
+  :func:`annotation_key` (mirrored into ``provenance.annotation_key``) that
+  supplies the research fields **and** ``file_path`` (D1: the archive has no
+  path) plus outcome evidence (``implementation`` / ``explicit_outcome``) per
+  the protocol in ``datasets/README.md``. Nothing is invented here: any record
+  the overlay does not fully cover is **excluded** with a machine-readable
+  reason, so the labelled research corpus never contains annotation it did not
+  really get.
+
+Two identities exist on purpose (D2): ``IngestRecord.review_id`` is PR level so
+``corpus._group_key`` can form multi-comment redundancy groups, while
+``IngestRecord.annotation_key`` stays per comment so one comment cannot
+overwrite another's overlay entry.
 
 Pass flow (documented in ``datasets/README.md``): (1) mechanical ingest → the
-``annotation_required`` exclusions yield the review-ids to annotate;
-(2) annotate those; (3) re-ingest with ``--annotation`` and an audit manifest.
+``annotation_required`` exclusions yield the per-comment annotation keys to
+annotate; (2) annotate those; (3) re-ingest with ``--annotation`` and an audit
+manifest.
 
 Hard rule (docs/Auth.md): a differing before/after pair is change evidence,
 never acceptance evidence. Positive labels therefore require the overlay's
@@ -32,6 +45,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
@@ -44,17 +58,39 @@ from app.experiments.labeling import VALID_EXPLICIT_OUTCOMES, VALID_IMPLEMENTATI
 ARCHIVE_DOI = "10.5281/zenodo.6900648"
 ARCHIVE_LICENSE = "CC-BY-4.0"
 
+# Raw-schema field -> every archive spelling accepted for it. The published
+# CodeReview record uses the second name (verified against the archive bytes:
+# datasets/DATASET_MAPPING_PROPOSAL.md §1); the bundled smoke fixture and the
+# raw-schema examples use the raw-schema name itself.
+ARCHIVE_ALIASES: dict[str, tuple[str, ...]] = {
+    "repo": ("repo",),
+    "pr_number": ("pr_number", "ghid"),
+    "review_comment": ("review_comment", "comment"),
+    "code_before": ("code_before", "old"),
+    "code_after": ("code_after", "new"),
+    "file_path": ("file_path",),  # optional in the archive; overlay otherwise
+}
+
+# What the archive itself must supply. ``file_path`` is deliberately absent: the
+# published archive carries no path field, so the path comes from the overlay
+# (decision D1 in datasets/DATASET_MAPPING_PROPOSAL.md).
 REQUIRED_ARCHIVE_FIELDS = (
     "repo",
     "pr_number",
-    "file_path",
     "review_comment",
     "code_before",
     "code_after",
 )
 
 # Research fields the archive cannot supply; the annotation overlay must.
-ANNOTATION_REQUIRED_FIELDS = ("category", "severity", "confidence", "reviewer")
+# ``file_path`` is an annotation field for the same reason (D1).
+ANNOTATION_REQUIRED_FIELDS = (
+    "file_path",
+    "category",
+    "severity",
+    "confidence",
+    "reviewer",
+)
 # Outcome evidence that may come from the overlay; enum-validated.
 ANNOTATION_OPTIONAL_FIELDS = (
     "implementation",
@@ -76,11 +112,16 @@ class IngestError(ValueError):
 
 @dataclass(frozen=True)
 class IngestRecord:
-    """One mapped raw-schema record plus its exclusion reason (None = included)."""
+    """One mapped raw-schema record plus its exclusion reason (None = included).
+
+    ``review_id`` is the PR-level grouping identity; ``annotation_key`` is the
+    per-comment key the overlay is written against (see module docstring).
+    """
 
     record: dict[str, Any]
     exclusion_reason: str | None
     review_id: str
+    annotation_key: str
 
 
 def ingest(
@@ -92,8 +133,8 @@ def ingest(
     overlay = _index_overlay(annotation)
     results: list[IngestRecord] = []
     for entry in archive:
-        record, reason = _map_record(entry, overlay)
-        results.append(IngestRecord(record, reason, str(record["review_id"])))
+        record, reason, key = _map_record(entry, overlay)
+        results.append(IngestRecord(record, reason, str(record["review_id"]), key))
     return results
 
 
@@ -111,71 +152,115 @@ def _index_overlay(
     return indexed
 
 
+def _archive_field(entry: Mapping[str, Any], raw_name: str) -> Any | None:
+    """First non-empty value among the accepted spellings of ``raw_name``."""
+    for name in ARCHIVE_ALIASES[raw_name]:
+        value = entry.get(name)
+        if value is not None and value != "":
+            return value
+    return None
+
+
 def _map_record(
     entry: Mapping[str, Any],
     overlay: Mapping[str, Mapping[str, Any]],
-) -> tuple[dict[str, Any], str | None]:
-    missing = [key for key in REQUIRED_ARCHIVE_FIELDS if not entry.get(key)]
+) -> tuple[dict[str, Any], str | None, str]:
+    missing = [
+        name
+        for name in REQUIRED_ARCHIVE_FIELDS
+        if _archive_field(entry, name) is None
+    ]
     if missing:
         raise IngestError(
             f"archive record missing required fields: {', '.join(missing)}"
         )
 
-    review_id = _review_id(entry)
-    annotation_for = overlay.get(review_id)
+    pr_id = review_id(entry)
+    key = annotation_key(entry)
+    annotation_for = overlay.get(key)
     if not overlay:
-        return _partial(review_id, entry), EXCLUSION_ANNOTATION_REQUIRED
+        return _partial(pr_id, key, entry), EXCLUSION_ANNOTATION_REQUIRED, key
     if annotation_for is None:
-        return _partial(review_id, entry), EXCLUSION_ANNOTATION_MISSING
+        return _partial(pr_id, key, entry), EXCLUSION_ANNOTATION_MISSING, key
 
-    record = _partial(review_id, entry)
+    record = _partial(pr_id, key, entry)
     _apply_annotation(record, annotation_for)
     reason = _missing_annotation(record)
     if reason is not None:
-        return record, reason
-    return record, None
+        return record, reason, key
+    return record, None, key
 
 
-def _review_id(entry: Mapping[str, Any]) -> str:
-    """Deterministic identity: content-based so reruns and annotators agree.
+def review_id(entry: Mapping[str, Any]) -> str:
+    """PR-level review identity (D2): ``{repo}#{pr_number}``.
+
+    PR numbering is per repository, so the repo qualifier keeps grouping keys
+    collision-free. Several comments of one PR share this id — which is exactly
+    what lets ``corpus._group_key`` form multi-comment redundancy groups. The
+    per-comment overlay key is :func:`annotation_key`.
+
+    Public because the annotation aid samples PRs with the same identity.
+    """
+    repo = _archive_field(entry, "repo")
+    pr = _archive_field(entry, "pr_number")
+    return f"{repo}#{pr}"
+
+
+def annotation_key(entry: Mapping[str, Any]) -> str:
+    """Per-comment overlay key: deterministic, so reruns and annotators agree.
 
     Prefers the archive's own ``comment_id`` when present; otherwise a sha256
-    over ``repo|pr_number|file_path|review_comment``.
+    over ``repo|pr_number|record_id|comment``, where ``record_id`` is the
+    archive's ``ids[0]``. ``file_path`` is deliberately **not** hashed: the
+    published archive carries no path and the path is an annotation field (D1),
+    so hashing it would make the key uncomputable before annotation.
     """
     explicit = entry.get("comment_id")
     if explicit:
         return str(explicit)
+    ids = entry.get("ids")
+    record_id = str(ids[0]) if isinstance(ids, (list, tuple)) and ids else ""
     digest = hashlib.sha256(
         "|".join(
             (
-                str(entry["repo"]),
-                str(entry["pr_number"]),
-                str(entry["file_path"]),
-                str(entry["review_comment"]),
+                str(_archive_field(entry, "repo")),
+                str(_archive_field(entry, "pr_number")),
+                record_id,
+                str(_archive_field(entry, "review_comment")),
             )
         ).encode("utf-8")
     ).hexdigest()
     return f"code-review:{digest}"
 
 
-def _partial(review_id: str, entry: Mapping[str, Any]) -> dict[str, Any]:
+def _partial(review_id: str, key: str, entry: Mapping[str, Any]) -> dict[str, Any]:
     """Mechanical-only mapping (no interpretation, no invented annotation)."""
     memory = entry.get("memory")
     if memory is not None and not isinstance(memory, dict):
         raise IngestError("archive 'memory' must be a JSON object when present")
-    before = str(entry["code_before"])
-    after = str(entry["code_after"])
+    before = str(_archive_field(entry, "code_before"))
+    after = str(_archive_field(entry, "code_after"))
+    line_start, line_end = _lines(entry)
+    provenance: dict[str, Any] = {
+        "source_archive": ARCHIVE_DOI,
+        "annotation_key": key,
+        "record_hash": _content_hash(review_id, entry),
+    }
+    if entry.get("ids") is not None:
+        # archive provenance: [record_id, sha_before, sha_after]
+        provenance["archive_ids"] = entry["ids"]
     return {
         "review_id": review_id,
-        "file_path": str(entry["file_path"]),
-        "line_start": entry.get("line_start"),
-        "line_end": entry.get("line_end"),
+        "repo": str(_archive_field(entry, "repo")),
+        "file_path": _archive_field(entry, "file_path"),
+        "line_start": line_start,
+        "line_end": line_end,
         "category": entry.get("category"),
         "severity": entry.get("severity"),
         "confidence": entry.get("confidence"),
         "reviewer": entry.get("reviewer_username") or entry.get("reviewer"),
         "round": _optional_int(entry.get("round"), default=1),
-        "comment": str(entry["review_comment"]),
+        "comment": str(_archive_field(entry, "review_comment")),
         "suggested_fix": entry.get("suggested_fix"),
         "actionable": _optional_bool(entry.get("actionable")),
         "is_review_comment": True,
@@ -184,11 +269,48 @@ def _partial(review_id: str, entry: Mapping[str, Any]) -> dict[str, Any]:
         "implementation": entry.get("implementation"),
         "explicit_outcome": entry.get("explicit_outcome"),
         "memory": memory or {},
-        "provenance": {
-            "source_archive": ARCHIVE_DOI,
-            "record_hash": _content_hash(review_id, entry),
-        },
+        "provenance": provenance,
     }
+
+
+_HUNK_HEADER = re.compile(r"^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,\d+)? @@")
+
+
+def _lines(entry: Mapping[str, Any]) -> tuple[int | None, int | None]:
+    """Explicit line fields when given, else the **old-side** range of ``hunk``.
+
+    Evidence (datasets/DATASET_MAPPING_PROPOSAL.md §1, 5,000 rows): marker-
+    stripped ``old`` equals the old side of ``hunk`` in 4,982/5,000 rows, so
+    ``hunk`` is the refinement change (C1 -> C2) and its ``-`` range is where
+    the reviewer was looking (the pre-refinement code). When neither source
+    exists the fields stay ``None`` and ``corpus._group_key`` buckets them as
+    ``"none"``.
+    """
+    line_start = entry.get("line_start")
+    line_end = entry.get("line_end")
+    derived_start: int | None = None
+    derived_end: int | None = None
+    if line_start is None or line_end is None:
+        derived_start, derived_end = _hunk_lines(entry.get("hunk"))
+    start = line_start if line_start is not None else derived_start
+    end = line_end if line_end is not None else derived_end
+    return _optional_int(start, default=None), _optional_int(end, default=None)
+
+
+def _hunk_lines(hunk: object) -> tuple[int | None, int | None]:
+    """Parse ``@@ -a,b +c,d @@`` → old-side line range ``a .. a+b-1``.
+
+    A pure insertion (``b`` absent or 0) has no old-side span; the anchor line
+    ``a`` is used so ``line_end >= line_start`` still holds.
+    """
+    if not isinstance(hunk, str):
+        return None, None
+    match = _HUNK_HEADER.match(hunk.split("\n", 1)[0])
+    if not match:
+        return None, None
+    start = int(match.group(1))
+    length = int(match.group(2) or 1)
+    return start, (start + length - 1) if length else start
 
 
 def _apply_annotation(
@@ -196,6 +318,7 @@ def _apply_annotation(
     overlay_entry: Mapping[str, Any],
 ) -> None:
     for key in (
+        "file_path",
         "category",
         "severity",
         "reviewer",
@@ -245,10 +368,10 @@ def _content_hash(review_id: str, entry: Mapping[str, Any]) -> str:
     raw = "|".join(
         (
             review_id,
-            str(entry.get("file_path", "")),
-            str(entry.get("review_comment", "")),
-            str(entry.get("code_before", "")),
-            str(entry.get("code_after", "")),
+            str(_archive_field(entry, "file_path") or ""),
+            str(_archive_field(entry, "review_comment") or ""),
+            str(_archive_field(entry, "code_before") or ""),
+            str(_archive_field(entry, "code_after") or ""),
         )
     )
     return hashlib.sha256(raw.encode("utf-8")).hexdigest()
@@ -296,8 +419,14 @@ def write_ingest_outputs(
     manifest: Path,
     source_archive: str,
     annotation_path: str | None,
+    annotation_provenance: Mapping[str, Any] | None = None,
 ) -> None:
-    """Write included raw JSONL, excluded JSONL (with reason), and the manifest."""
+    """Write included raw JSONL, excluded JSONL (with reason), and the manifest.
+
+    ``annotation_provenance`` records *who/what* produced the overlay (annotator
+    identity, rubric file, evidence file) — methods-provenance only; it never
+    affects mapping, labelling or exclusion.
+    """
     included = [item for item in records if item.exclusion_reason is None]
     excluded_records = [
         {
@@ -329,6 +458,11 @@ def write_ingest_outputs(
                 "archive_sha256": hashlib.sha256(archive_bytes).hexdigest(),
             },
             "annotation": annotation_path,
+            **(
+                {"annotation_provenance": dict(annotation_provenance)}
+                if annotation_provenance
+                else {}
+            ),
             "counts": {
                 "total": len(records),
                 "included": len(included),
