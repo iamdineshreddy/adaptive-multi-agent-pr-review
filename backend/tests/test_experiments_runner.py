@@ -273,3 +273,70 @@ def test_learned_mode_raises_when_there_are_no_training_candidates() -> None:
     )
     with pytest.raises(ValueError, match="training candidate"):
         run_mode(corpus, BASELINES["B4"], seed=0)
+
+
+def test_payload_records_code_version_for_reproducibility() -> None:
+    """Each run records its code commit/dirty flag (EXPERIMENTS.md §5)."""
+    corpus = build_corpus(
+        [
+            _rec(
+                "v1",
+                "a.py",
+                10,
+                "security/xss",
+                "high",
+                0.9,
+                "security",
+                implemented=True,
+                implementation="verbatim",
+            )
+        ],
+        source="t",
+    )
+    payload = run_mode(corpus, BASELINES["B3"], seed=0)
+    version = payload["code_version"]
+    assert set(version) == {"commit", "dirty"}
+    # unavailable values are recorded as None, never guessed
+    assert version["commit"] is None or (
+        isinstance(version["commit"], str) and len(version["commit"]) >= 7
+    )
+    assert version["dirty"] in (True, False, None)
+    # cached per process, so the same-seed determinism contract still holds
+    assert payload == run_mode(corpus, BASELINES["B3"], seed=0)
+
+
+def test_budget_is_per_review_and_metrics_use_publication_set() -> None:
+    """Budget caps published findings *per review* (ARUM.md §7) and the ARUM §5
+    ratios are computed over the publication set, not the candidate set.
+
+    Two reviews x 3 candidates with budget=2 must publish 2 per review (4 of 6),
+    not 2 corpus-wide and not all 6 candidates.
+    """
+    rows = [
+        _rec(
+            review,
+            "a.py",
+            line,
+            "security/xss",
+            "high",
+            0.9,
+            "security",
+            implemented=True,
+            implementation="verbatim",
+        )
+        for review in ("v1", "v2")
+        for line in (10, 40, 70)
+    ]
+    corpus = build_corpus(rows, source="t")
+    payload = run_mode(corpus, replace(BASELINES["B3"], budget=2), seed=0)
+
+    selection = payload["selection"]
+    assert selection["cap"] == 2
+    assert selection["selected_count"] == 4  # 2 per review, not 2 corpus-wide
+    assert selection["truncated_by_budget"] == 2
+
+    metrics = payload["metrics"]
+    # every finding is FIXED; the publication set is 4 of 6 candidates
+    assert metrics["comment_reduction"] == pytest.approx((6 - 4) / 6)
+    assert metrics["recall"] == pytest.approx(4 / 6)
+    assert metrics["precision"] == pytest.approx(1.0)

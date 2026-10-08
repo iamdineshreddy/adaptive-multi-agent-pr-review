@@ -13,8 +13,10 @@ from __future__ import annotations
 
 import hashlib
 import json
+import subprocess
 from collections.abc import Sequence
 from dataclasses import dataclass, replace
+from functools import lru_cache
 from typing import Any
 
 from app.adaptive.features import (
@@ -30,10 +32,7 @@ from app.adaptive.features import (
     severity_score,
 )
 from app.adaptive.scoring import Decision, rank_decisions, utility
-from app.adaptive.selection import (
-    GATE_REASON_SUPPRESSED,
-    select_decisions,
-)
+from app.adaptive.selection import select_decisions
 from app.adaptive.training import (
     build_training_matrix,
     fit_logistic,
@@ -54,6 +53,32 @@ from app.experiments.modes import ModeConfig
 
 LEARNED_WEIGHTS_VERSION = "v1-learned"
 TRAIN_FRACTION = 0.8
+
+
+@lru_cache(maxsize=1)
+def code_version() -> dict[str, Any]:
+    """Code version recorded for reproducibility (docs/EXPERIMENTS.md §5).
+
+    Cached per process so the value cannot change mid-run (the run payload must
+    stay deterministic for a fixed seed). Unavailable values are recorded as
+    ``None`` — never guessed.
+    """
+
+    def _git(*args: str) -> str:
+        return subprocess.run(
+            ["git", *args],
+            capture_output=True,
+            text=True,
+            timeout=15,
+            check=True,
+        ).stdout
+
+    try:
+        commit = _git("rev-parse", "HEAD").strip()
+        status = _git("status", "--porcelain").strip()
+    except Exception:  # no git, no repo, timeout — record honestly
+        return {"commit": None, "dirty": None}
+    return {"commit": commit or None, "dirty": bool(status)}
 
 
 @dataclass(frozen=True)
@@ -292,44 +317,56 @@ def _select(
             },
         )
 
-    cap = config.budget if config.budget is not None else len(decisions)
-    if config.gates:
-        result = select_decisions(decisions, cap=cap)
-        return (
-            list(result.decisions),
-            {
-                "cap": cap,
-                "selected_count": result.selected_count,
-                "mandatory_count": result.mandatory_count,
-                "protected_count": result.protected_count,
-                "suppressed_by_gate": sum(
-                    1
-                    for d in result.decisions
-                    if d.selected is False and d.safety_gate == GATE_REASON_SUPPRESSED
-                ),
-                "truncated_by_budget": result.truncated_by_budget,
-            },
-        )
+    # Budget + gates are evaluated **per review** (ARUM.md §7: the budget caps
+    # published findings per review; the production orchestrator calls
+    # select_decisions once per review with that review's decisions). Grouping
+    # by review_id keeps one review's budget from truncating another review's
+    # findings — a corpus-wide cap would suppress findings in reviews that are
+    # themselves under budget.
+    by_review: dict[str, list[Decision]] = {}
+    for decision in decisions:
+        by_review.setdefault(decision.review_id, []).append(decision)
 
-    ranked = rank_decisions(decisions)
-    published = {d.finding_id for d in ranked[:cap]}
-    annotated = [
-        _annotate(
-            d,
-            selected=d.finding_id in published,
-            budget_cap=cap if d.finding_id in published else None,
+    publication_set: list[Decision] = []
+    selected_count = 0
+    mandatory_count = 0
+    protected_count = 0
+    suppressed_by_gate = 0
+    truncated_by_budget = 0
+    for review_id in sorted(by_review):
+        group = by_review[review_id]
+        cap = config.budget if config.budget is not None else len(group)
+        if config.gates:
+            result = select_decisions(group, cap=cap)
+            publication_set.extend(result.decisions)
+            selected_count += result.selected_count
+            mandatory_count += result.mandatory_count
+            protected_count += result.protected_count
+            suppressed_by_gate += result.suppressed_by_gate
+            truncated_by_budget += result.truncated_by_budget
+            continue
+        ranked = rank_decisions(group)
+        published = {d.finding_id for d in ranked[:cap]}
+        publication_set.extend(
+            _annotate(
+                d,
+                selected=d.finding_id in published,
+                budget_cap=cap if d.finding_id in published else None,
+            )
+            for d in ranked
         )
-        for d in ranked
-    ]
+        selected_count += len(published)
+        truncated_by_budget += max(len(ranked) - cap, 0)
+
     return (
-        annotated,
+        publication_set,
         {
-            "cap": cap,
-            "selected_count": len(published),
-            "mandatory_count": 0,
-            "protected_count": 0,
-            "suppressed_by_gate": 0,
-            "truncated_by_budget": max(len(ranked) - cap, 0),
+            "cap": config.budget,
+            "selected_count": selected_count,
+            "mandatory_count": mandatory_count,
+            "protected_count": protected_count,
+            "suppressed_by_gate": suppressed_by_gate,
+            "truncated_by_budget": truncated_by_budget,
         },
     )
 
@@ -354,7 +391,11 @@ def _outcome(
     candidates: Sequence[Candidate],
     selected: Sequence[Decision],
 ) -> RunOutcome:
-    selected_ids = {d.finding_id for d in selected}
+    # ARUM.md §5 defines every ratio over the *publication set*; `_select`
+    # annotates each decision with its `selected` flag (mandatory/protected/
+    # budget-truncated/suppressed), so the publication set is the flagged
+    # subset — not every candidate handed to selection.
+    selected_ids = {d.finding_id for d in selected if d.selected}
     published = [c for c in candidates if _candidate_finding_id(c) in selected_ids]
     published_ids = {_candidate_finding_id(c) for c in published}
     not_published = [
@@ -431,6 +472,7 @@ def _payload(
         "mode": config.key,
         "label": config.label,
         "seed": seed,
+        "code_version": code_version(),
         "honesty": {
             "note": (
                 "selection-layer harness over a concrete corpus; agent-layer "

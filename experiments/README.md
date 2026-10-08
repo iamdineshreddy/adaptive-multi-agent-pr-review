@@ -35,8 +35,10 @@ python experiments/run/run_all.py [--corpus <raw.jsonl>] [--seed 0] \
 
 Outputs: one reproducibility JSON per mode (`results/runs/<KEY>.json`),
 a combined `summary.csv`, and `summary.json` with the ablation-vs-B5 delta table.
-Every result payload carries its corpus provenance and an explicit
-`honesty` block.
+Every result payload carries its corpus provenance, the code commit/dirty flag
+(`code_version`), and an explicit `honesty` block; `summary.json` additionally
+records the execution timestamp and interpreter version (wall-clock values live
+there only, so per-mode payloads stay deterministic for a fixed seed).
 
 ## Integrity contract
 

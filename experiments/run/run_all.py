@@ -15,7 +15,9 @@ Usage:
 from __future__ import annotations
 
 import argparse
+import platform
 import sys
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -86,16 +88,34 @@ def _summary_payload(
     runs: dict[str, dict[str, Any]],
     deltas: dict[str, dict[str, float | None]],
 ) -> dict[str, Any]:
+    from app.experiments.runner import code_version
+
     return {
         "corpus": corpus.provenance,
         "seed": seed,
         "configured_modes": list(runs.keys()),
+        # Wall-clock execution record lives here (not in the per-mode payloads,
+        # which must stay deterministic for a fixed seed — EXPERIMENTS.md §5).
+        "execution": {
+            "timestamp_utc": datetime.now(timezone.utc).isoformat(
+                timespec="seconds"
+            ),
+            "python": platform.python_version(),
+            "code_version": code_version(),
+            "kind": (
+                "offline selection-layer harness: no LLM invoked, findings "
+                "come from the labelled corpus (agent-layer latency/token/cost "
+                "not measured here)"
+            ),
+            "model_provider": None,
+        },
         "deltas_vs_b5": deltas,
         "integrity": (
             "Numbers reflect an executed run over the listed corpus. The "
-            "bundled sample is a smoke corpus for pipeline verification, NOT "
-            "a research dataset; paper numbers await the github-codereview "
-            "ingestion (datasets/README.md) and its licensing review."
+            "bundled sample remains a smoke corpus for pipeline verification, "
+            "NOT a research dataset; the research table is executed over the "
+            "annotated github-codereview corpus recorded in the corpus block "
+            "and datasets/README.md."
         ),
     }
 
