@@ -123,7 +123,7 @@ pip install -e ".[dev,all]"
 cp ../.env.example .env
 alembic upgrade head                # needs PostgreSQL
 uvicorn app.main:app --reload       # http://localhost:8000/api/docs
-pytest -q                           # 534 passed / 20 skipped (no infra)
+pytest -q                           # 578 passed / 19 skipped (no infra)
 ```
 
 Full stack (needs a Docker host):
@@ -156,7 +156,7 @@ backend/
         database/       Async engine, session factory
         config/         pydantic-settings configuration
         monitoring/     Prometheus, Langfuse, structured logging
-    tests/              554 tests (unit + gated live-service lanes)
+    tests/              597 tests (unit + gated live-service lanes)
     alembic/            Schema migrations
 frontend/               React + TypeScript + Tailwind dashboard (Vite)
 infra/
@@ -164,7 +164,7 @@ infra/
     prometheus/         Scrape config (api + worker exporters)
     grafana/            Provisioning + adaptive-review dashboard
 docs/                   Design + research documentation
-experiments/            Preprocessing, run_all, sample corpus (Results pending)
+experiments/            Preprocessing, run_all, sample corpus (real run executed)
 datasets/               Dataset registration + labelling rules
 docker-compose.yml      Full platform stack
 ```
@@ -191,15 +191,17 @@ silently cut):
   errors release the claim for retry, permanent errors dead-letter. Celery
   tasks on `publisher_queue` with bounded retries + backoff. 29 publisher
   tests (12 service + 9 task + 4 integration + 4 iteration).
-- **Phase 17 part 1** done: reproducible experiment harness (`app/experiments` +
-  `experiments/`) with label pre-processing, B1–B5 + A1–A6 ablation modes over
-  the real `app.adaptive` machinery, and 39 harness tests. **Part 2** in
-  progress: plotting tooling authored (`plots` extra, `experiments/run/plot_summary.py`)
-  and executed on the bundled sample — figures render with a baked-in
-VERIFICATION-ONLY footnote (PNGs/CSVs gitignored). The `github-codereview`
-  source is licensed for ingestion (Li et al. CodeReview archive, Zenodo,
-  CC-BY-4.0 — `datasets/README.md`); downloading + ingesting that corpus and
-  the executed results table are the remaining dataset step.
+- **Phase 17 done** (parts 1 and 2): reproducible experiment harness
+  (`app/experiments` + `experiments/`) with label pre-processing, B1–B5 +
+  A1–A6 ablation modes over the real `app.adaptive` machinery, and the
+  experiment test lane (`tests/test_experiments_*.py`); plotting tooling
+  (`plots` extra, `experiments/run/plot_summary.py`) executed on the real
+  corpus. The `github-codereview` corpus (Li et al.
+  CodeReview archive, Zenodo, CC-BY-4.0 — `datasets/README.md`) was
+  downloaded, ingested, and annotated, and the full run
+  (`run_all.py --corpus datasets/annotation/pass2/raw.jsonl --seed 0`)
+  produced the results table in `docs/EXPERIMENTS.md` §9; figures render
+  with a baked-in footnote (PNGs/CSVs gitignored).
 - **Phase 18 part 1** done: Docker Compose topology, images, worker metrics
   exporter, beat scheduler, deployment runbook. **Part 2** in progress: the
   live `docker compose up` boot smoke is authored (`tests/test_integration_compose_smoke.py`,
@@ -208,15 +210,16 @@ VERIFICATION-ONLY footnote (PNGs/CSVs gitignored). The `github-codereview`
 - **Phase 19** done: this README, `docs/ARCHITECTURE.md` refinement,
   `docs/RESEARCH.md`, `docs/EXPERIMENTS.md` finalisation.
 
-**Nothing not implemented is claimed.** References to experimental numbers
-that have not been produced are labelled as "Results pending experimental
-validation". Live Docker/GitHub E2E validation requires infrastructure not
-available in this environment.
+**Nothing not implemented is claimed.** Quantities that no harness output
+measures (latency, tokens, cost, queue throughput, NDCG/MRR) stay labelled
+"NOT MEASURED" in `docs/EXPERIMENTS.md`; the B1 row is "NOT MEASURED"
+(0 trainable candidates). Live Docker/GitHub E2E validation requires
+infrastructure not available in this environment.
 
-Suite today: **564 passed / 20 skipped** (10 PostgreSQL, 1 PostgreSQL+Redis,
-9 PostgreSQL+Redis+Docker — all lanes self-skip when the services are
-unreachable), ruff/mypy clean, 84% line coverage over `backend/app`. See
-`docs/TESTING.md`.
+Suite today: **578 passed / 19 skipped** (13 PostgreSQL-dependent, 6
+Compose-smoke — all lanes self-skip when the services are unreachable),
+ruff + ruff-format + strict mypy clean, 85% line coverage over
+`backend/app`. See `docs/TESTING.md`.
 
 ---
 

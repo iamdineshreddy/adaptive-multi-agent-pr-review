@@ -59,7 +59,7 @@ Run read-only against the extracted `datasets/raw/Code_Refinement/ref-test.jsonl
 
 | # | Question | Method | Result |
 | --- | --- | --- | --- |
-| V1 | Is `new` observed or synthesised? | Li et al., EMNLP 2022 §3.3 (ar5iv mirror of arXiv:2203.09095) | **Observed.** "when the reviewer writes a comment on the code diff D:C0→C1 and the revised source code lines in C1 are further modified to a newer version C2 in a later commit … Then the triplets (C1,Rnl,C2) are collected to build the code refinement dataset." |
+| V1 | Is `new` observed or synthesised? | Li et al., ESEC/FSE 2022 §3.3 (ar5iv mirror of arXiv:2203.09095) | **Observed.** "when the reviewer writes a comment on the code diff D:C0→C1 and the revised source code lines in C1 are further modified to a newer version C2 in a later commit … Then the triplets (C1,Rnl,C2) are collected to build the code refinement dataset." |
 | V2 | Filtered to comments followed by a change? | same §3.3 | **Yes, by construction** ("we check all the commits in this pull request to find whether there is a later commit that updates this part of code again"; ambiguous multi-comment/multi-revision samples are removed) → confirms D3. |
 | V3 | What is `ghid`? | GitHub API, `projectcalico/felix` #1853 and `tenzir/vast` #466 | **PR number** (both PRs exist at those numbers). D7 confirmed as an observation, not an assumption. |
 | V4 | What is `ids`? | same API check | `ids[1]` = the review-time `original_commit_id` (C1), `ids[2]` = the later revision `commit_id` (C2). `ids[0]` matches no GitHub field → **UNVERIFIED** (treated as an opaque record id, used only as overlay-key input). |

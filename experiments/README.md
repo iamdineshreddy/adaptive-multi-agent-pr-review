@@ -42,10 +42,14 @@ there only, so per-mode payloads stay deterministic for a fixed seed).
 
 ## Integrity contract
 
-- **All results are pending experimental validation.** The bundled sample is a
-  smoke corpus for pipeline verification, NOT research data; the paper's
-  numbers await the `github-codereview` ingestion (datasets/README.md) and its
-  licensing review.
+- **The real run is executed; measured and unmeasured quantities are labelled
+  separately.** The bundled sample remains a smoke corpus for pipeline
+  verification, NOT research data. The research run executed over the
+  annotated `github-codereview` corpus (Li et al. CodeReview archive, Zenodo,
+  CC-BY-4.0 — `datasets/README.md`); its results table is in
+  `docs/EXPERIMENTS.md` §7. Quantities no harness output measures (latency,
+  tokens, cost, queue throughput, NDCG/MRR, B1) stay explicitly "NOT
+  MEASURED" there — never estimated.
 - No invented numbers: every metric in a run payload was computed by an
   executed run over the exact listed corpus, with the seed and mode config
   recorded.

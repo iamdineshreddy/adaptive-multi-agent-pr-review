@@ -12,7 +12,7 @@ repository.
 **Review completed for ingestion (Phase 17 part 2, `docs/EXPERIMENTS.md` §8).**
 The `github-codereview` corpus used here is the Li et al. **CodeReview** dataset
 (the archive of *Automating Code Review Activities by Large-Scale Pre-Training*,
-EMNLP 2022 / arXiv:2203.09095), distributed on Zenodo:
+ESEC/FSE 2022 / arXiv:2203.09095, DOI `10.1145/3540250.3549081`), distributed on Zenodo:
 
 - Record: <https://zenodo.org/records/6900648> — DOI `10.5281/zenodo.6900648`
   (license field verified via the Zenodo REST API: **CC-BY-4.0**).
@@ -34,7 +34,7 @@ Gates applied **at ingestion time** (no slice is used without these):
    (dataset DOI, raw slice hash, upstream repository) — `experiments/preprocessing/preprocess.py`
    already emits this manifest.
 3. Attribution to the dataset persists in every derived artifact
-   (citation: Li et al., EMNLP 2022).
+   (citation: Li et al., ESEC/FSE 2022, DOI `10.1145/3540250.3549081`).
 4. Extracted code snippets are used for **evaluation only and never
    redistributed**; the record's license field is re-verified against the
    Zenodo API at ingest time before any slice is processed.

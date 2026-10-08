@@ -39,21 +39,23 @@ and compared against directly in the final paper.
 Each question is answered only from executed runs over the labelled
 `github-codereview` slice (or a documented surrogate); no run, no number.
 
-## 3. Related work (to be cited with verification)
+## 3. Related work (verified at the Phase 17 part 2 close-out)
 
 | Area | Representative work | Relation to this project |
 | --- | --- | --- |
 | Multi-agent LLM systems | Wu et al., *AutoGen* (2023); Hong et al., *MetaGPT* (2023); Du et al., *Improving Factuality ... Multiagent Debate* (2023) | Agent fan-out with a coordinating supervisor; we add a deterministic decision/reduction stage after the LLM layer |
-| Automated code review | Li et al., *CodeReviewer: Pre-Training for Code Review* (EMNLP 2022); Lu et al., *CodeXGLUE*; Tufano et al., *Empirical Study ... Bug-Fixing Patches* (2021) | Detection side of the pipeline; complements (does not replace) review-comment generation |
-| Code-review datasets | Li et al., *CodeReviewer* (EMNLP 2022), `github-codereview` = CodeReview archive, DOI `10.5281/zenodo.6900648` (CC-BY-4.0); Liang et al., *Code Reviews with LLMs* (related corpora) | Primary evaluation data; labelling/licensing per `datasets/README.md` |
-| Learning to rank | Burges, *From RankNet to LambdaRank to LambdaMART* (2010); Liu, *Learning to Rank for Information Retrieval* (2011) | ARUM ranking + weight fitting are a linear-LTR formulation over interpretable features |
+| Automated code review | Li et al., *Automating Code Review Activities by Large-Scale Pre-training* (ESEC/FSE 2022); Lu et al., *CodeXGLUE* (2021); Tufano et al., *An Empirical Study on Learning Bug-Fixing Patches in the Wild via Neural Machine Translation* (TOSEM 2019) | Detection side of the pipeline; complements (does not replace) review-comment generation |
+| Code-review datasets | Li et al., *Automating Code Review Activities by Large-Scale Pre-training* (ESEC/FSE 2022), `github-codereview` = CodeReview archive, dataset DOI `10.5281/zenodo.6900648` (CC-BY-4.0) | Primary evaluation data; labelling/licensing per `datasets/README.md` |
+| Learning to rank | Burges, *From RankNet to LambdaRank to LambdaMART* (2010, MSR-TR-2010-82); Liu, *Learning to Rank for Information Retrieval* (2009) | ARUM ranking + weight fitting are a linear-LTR formulation over interpretable features |
 | Semantics of redundancy | Reimers & Gurevych, *Sentence-BERT* (2019); pgvector (vector similarity index project) | Grouping duplicate findings via normalised cosine + category + proximity |
-| Explicit reinforcement/online preference | Standard online-learning / bandit textbooks (Sutton & Barto; Robbins 1952) | Temporal decay + per-repo weight candidates framed as online preference adaptation |
+| Explicit reinforcement/online preference | Standard online-learning / bandit texts (Sutton & Barto 2018; Robbins & Monro 1951) | Temporal decay + per-repo weight candidates framed as online preference adaptation |
 | Orchestration state machines | LangGraph / LangChain; statechart literature (Harel 1987) | Explicit, resumable, diagnosable review lifecycle |
 
-Before submission, every citation must be re-verified (authors, venue, year, arXiv
-ID/DOI) and the metadata filled in the bibliography; **no citation is included
-that cannot be resolved to a specific, citable artefact.**
+Every citation must be re-verified (authors, venue, year, arXiv ID/DOI) with
+the metadata filled in the bibliography; **no citation is included that cannot
+be resolved to a specific, citable artefact.** *(Executed at the Phase 17
+part 2 close-out — verified bibliography, corrections log, and the one drop
+are recorded below.)*
 
 ### Comparison protocol (Phase 17 part 2)
 
@@ -73,10 +75,10 @@ same-task setting exists, for a future class (b) comparison):
 
 | Our mode | Nearest literature anchor | Relation |
 | --- | --- | --- |
-| B1 (one reviewer, all findings) | Tufano et al., bug-fixing-patch quality (2021); CodeXGLUE code-review comment quality | Unfiltered review emission; the "report everything" baseline |
+| B1 (one reviewer, all findings) | Tufano et al., bug-fixing-patch prediction (2019); CodeXGLUE comment generation / defect detection | Unfiltered review emission; the "report everything" baseline |
 | B2 (multi-agent, dedup-only) | AutoGen / MetaGPT-style multi-agent scaffolds (without a selection gate) | Fan-out + aggregation without a decision layer |
-| B3 (static ARUM weights + budget) | Burges, *From RankNet to LambdaRank* (2010); Liu, LTR survey (2011) | Fixed-weight linear ranking + cap as a non-learnt filter |
-| B4 (learned weights + repo memory) | Online preference / implicit-feedback LTR (bandit textbooks; Robbins 1952) | Per-repo weight adaptation from feedback signals |
+| B3 (static ARUM weights + budget) | Burges, *From RankNet to LambdaRank* (2010); Liu, LTR survey (2009) | Fixed-weight linear ranking + cap as a non-learnt filter |
+| B4 (learned weights + repo memory) | Online preference / implicit-feedback LTR (bandit texts; Robbins & Monro 1951) | Per-repo weight adaptation from feedback signals |
 | B5 (gates, iteration, disagreement) | Li et al., CodeReviewer (2022) system framing | End-to-end review pipeline; compared as a system, not one task |
 | A1..A6 (ablations) | — | Internal attribution vs B5; not a literature comparison |
 
@@ -85,7 +87,7 @@ report ours descriptively and say so):
 
 | ARUM §5 metric | Comparable literature metric | Notes |
 | --- | --- | --- |
-| precision / recall / F1 on actionable findings | CodeReviewer task-accuracy and comment-relevance; CodeXGLUE quality prediction | Same-task comparisons must re-run their benchmark protocol, not reuse their reported tables against different splits |
+| precision / recall / F1 on actionable findings | CodeReviewer task-accuracy and comment-relevance; CodeXGLUE comment generation / defect detection | Same-task comparisons must re-run their benchmark protocol, not reuse their reported tables against different splits |
 | redundancy reduction | Duplicate/overlap comment rate (Li et al. data curation) | Descriptive only; no agreed corpus-level metric exists |
 | acceptance rate / actionability | Implemented / acknowledged comment rate (Tufano patch adoption) | Proxies only; label provenance differs per study |
 
@@ -94,6 +96,106 @@ numeric cells stay "no executed run — results pending" (no fabrications, never
 assert novelty, docs/EXPERIMENTS.md §6). A literature-claims ledger (one row
 per claim, mapping to this protocol) is maintained during the final run and
 submission, not in advance.
+
+### Verified bibliography (executed 2026-10-08, Phase 17 part 2)
+
+Verification sources: Crossref REST API, arXiv API, Zenodo REST API, the
+Microsoft Research publication page, the ACL Anthology DOI record (via
+Crossref), and the Open Library ISBN record. Software projects resolve to
+their repositories / documentation sites.
+
+| Key | Citation (verified metadata) | Verified via |
+| --- | --- | --- |
+| Li2022 | Li, Z., Lu, S., Guo, D., Duan, N., Jannu, S., Jenks, G., Majumder, D., Green, J., Svyatkovskiy, A., Fu, S., Sundaresan, N. *Automating Code Review Activities by Large-Scale Pre-training*. **ESEC/FSE 2022**, pp. 1035–1047. DOI `10.1145/3540250.3549081`; arXiv:2203.09095. Dataset: Zenodo DOI `10.5281/zenodo.6900648` (CC-BY-4.0) | Crossref event record ("ESEC/FSE '22"); arXiv comment "ESEC/FSE 2022, camera-ready version"; Zenodo API |
+| Lu2021 | Lu, S. et al. *CodeXGLUE: A Machine Learning Benchmark Dataset for Code Understanding and Generation*. arXiv:2102.04664 (2021) | arXiv API |
+| Tufano2019 | Tufano, M., Watson, C., Bavota, G., Di Penta, M., White, M., Poshyvanyk, D. *An Empirical Study on Learning Bug-Fixing Patches in the Wild via Neural Machine Translation*. **ACM TOSEM 28(4):1–29 (2019)**. DOI `10.1145/3340544`; arXiv:1812.08693 | Crossref; arXiv API |
+| Wu2023 | Wu, Q. et al. *AutoGen: Enabling Next-Gen LLM Applications via Multi-Agent Conversation*. arXiv:2308.08155 (2023) | arXiv API |
+| Hong2023 | Hong, S. et al. *MetaGPT: Meta Programming for A Multi-Agent Collaborative Framework*. arXiv:2308.00352 (2023) | arXiv API |
+| Du2023 | Du, Y., Li, S., Torralba, A., Tenenbaum, J. B., Mordatch, I. *Improving Factuality and Reasoning in Language Models through Multiagent Debate*. arXiv:2305.14325 (2023) | arXiv API |
+| Burges2010 | Burges, C. J. C. *From RankNet to LambdaRank to LambdaMART: An Overview*. Microsoft Research Technical Report **MSR-TR-2010-82** (June 2010); no journal version exists | microsoft.com/research publication page (journal absence cross-checked against Crossref and the *Machine Learning* table of contents) |
+| Liu2009 | Liu, T.-Y. *Learning to Rank for Information Retrieval*. **Foundations and Trends in Information Retrieval 3(3):225–331 (2009)**. DOI `10.1561/1500000016` | Crossref |
+| Reimers2019 | Reimers, N., Gurevych, I. *Sentence-BERT: Sentence Embeddings using Siamese BERT-Networks*. EMNLP-IJCNLP 2019, pp. 3980–3990. DOI `10.18653/v1/D19-1410`; arXiv:1908.10084 | Crossref / ACL Anthology; arXiv API |
+| Harel1987 | Harel, D. *Statecharts: A Visual Formalism for Complex Systems*. **Science of Computer Programming 8(3):231–274 (1987)**. DOI `10.1016/0167-6423(87)90035-9` | Crossref |
+| RobbinsMonro1951 | Robbins, H., Monro, S. *A Stochastic Approximation Method*. **The Annals of Mathematical Statistics 22(3):400–407 (1951)**. DOI `10.1214/aoms/1177729586` | Crossref |
+| SuttonBarto2018 | Sutton, R. S., Barto, A. G. *Reinforcement Learning: An Introduction* (Adaptive Computation and Machine Learning series). 2nd ed., MIT Press / A Bradford Book (2018). ISBN 978-0-262-0392-46 | Open Library ISBN record |
+| Projects | LangGraph, LangChain, pgvector — cited as software projects (repository / documentation URL), no publication metadata | project artefacts |
+
+**Dropped at verification** (per the rule above): *"Liang et al., Code
+Reviews with LLMs (related corpora)"* — an arXiv search of `au:Liang` with
+`ti:"code review"` (14 results) resolves to no artefact with this title and
+no other candidate could be resolved to a specific work; the entry is
+removed rather than replaced by a guessed work.
+
+**Corrections applied to pre-existing doc strings** (verification-driven;
+no result text changed, no test reads these strings):
+
+| Doc string (before) | Verified artefact | Action |
+| --- | --- | --- |
+| "EMNLP 2022" (6 occurrences: this doc ×2, `datasets/README.md` ×2, `datasets/DATASET_MAPPING_PROPOSAL.md`, `docs/EXPERIMENTS.md` §8) | ESEC/FSE 2022, DOI `10.1145/3540250.3549081` | corrected in place |
+| Title "*CodeReviewer: Pre-Training for Code Review*" | *Automating Code Review Activities by Large-Scale Pre-training* (CodeReviewer is the model that paper introduces) | corrected in place |
+| Tufano "(2021)" | TOSEM 28(4):1–29 (2019), DOI `10.1145/3340544` | corrected in place |
+| Liu "(2011)" | FnTIR 3(3):225–331 (2009), DOI `10.1561/1500000016` | corrected in place |
+| "Robbins 1952" | resolved to the artefact matching the row's stated role: Robbins & Monro (1951), stochastic approximation | replaced |
+| "(Sutton & Barto)" undated | 2nd ed. (2018), ISBN 978-0-262-0392-46 | metadata filled |
+| Burges "(2010)" | correct year; artefact is technical report MSR-TR-2010-82 (no journal version) | metadata filled |
+| "CodeXGLUE code-review comment quality / quality prediction" | CodeXGLUE's actual tasks (comment generation, defect detection); it has no code-review task | wording tightened to the artefact |
+
+### Executed comparison (Phase 17 part 2, per the protocol above)
+
+**Class (a) — methodological (committed with the tables above; no
+performance assertions):**
+
+- **B1 ↔ Tufano2019, Lu2021**: the "report everything" baseline corresponds
+  to unfiltered emission; Tufano2019 predicts developer patches on mined
+  GitHub histories and Lu2021 measures comment-generation / defect-detection
+  tasks under CodeXGLUE splits — design-level correspondence only.
+- **B2 ↔ Wu2023, Hong2023, Du2023**: B2 keeps multi-agent fan-out plus
+  aggregation and removes the selection gate; the cited systems provide
+  orchestration without a publication/decision layer.
+- **B3 ↔ Burges2010, Liu2009**: the static mode is a fixed-weight linear
+  ranking model over explicit features with a cap — the LTR formulation the
+  cited works describe.
+- **B4 ↔ RobbinsMonro1951, SuttonBarto2018**: per-repo weight candidates and
+  temporal decay are framed as online preference adaptation in the
+  stochastic-approximation sense; no bandit policy is evaluated as such.
+- **B5 ↔ Li2022**: end-to-end review-pipeline framing; Li2022 supplies the
+  corpus and the detection-side reference, not a selection-layer baseline.
+- **§1 label evidence ↔ Tufano2019, Li2022**: acceptance/outcome labels come
+  from the annotation passes (`datasets/README.md`, `docs/EXPERIMENTS.md`
+  §1a) and `implemented_later` traces to Li2022 §3.3's collection procedure;
+  Tufano2019-style adoption rates remain a *proxy* (different corpora,
+  different provenance) — stated in the metric-mapping row above, no number
+  compared.
+- **A1–A6**: internal attribution against B5 ("not a literature comparison",
+  mapping table).
+
+**Class (b) — quantitative: none claimed, by protocol determination.** Every
+candidate setting (CodeReviewer task accuracy, CodeXGLUE comment/defect
+tasks, Tufano2019 patch adoption) differs from our 494-record labelled slice
+in corpus and/or split and/or metric, and none of the executed runs re-runs
+a cited work's benchmark protocol. Under the cross-corpus prohibition the
+executed numbers (`docs/EXPERIMENTS.md` §9) therefore stand alone as
+our-corpus results with **no numeric literature comparison** — reported as
+"NOT COMPARED (protocol)" rather than a fabricated cell.
+
+### Literature-claims ledger
+
+Maintained at the final run per the protocol above (citation verification
+executed 2026-10-08).
+
+| # | Claim as published in the docs | Class | Citation | Status / location |
+| --- | --- | --- | --- | --- |
+| C1 | Multi-agent fan-out with a coordinating supervisor; we add a deterministic decision/reduction stage after the LLM layer | (a) | Wu2023, Hong2023, Du2023 | committed — §3 related-work row 1 |
+| C2 | Detection side complements (does not replace) review-comment generation | (a) | Li2022, Lu2021, Tufano2019 | committed — §3 row 2 |
+| C3 | Primary evaluation data, licence and attribution provenance | factual (dataset attribution, not performance) | Li2022; Zenodo DOI | committed — `datasets/README.md`, §3 row 3 |
+| C4 | ARUM ranking + weight fitting are a linear-LTR formulation over interpretable features | (a) | Burges2010, Liu2009 | committed — §3 row 4 |
+| C5 | Redundancy grouping via normalised cosine + category + proximity | (a) | Reimers2019; pgvector | committed — §3 row 5 |
+| C6 | Temporal decay + per-repo weight candidates framed as online preference adaptation | (a) | RobbinsMonro1951, SuttonBarto2018 | committed — §3 row 6 |
+| C7 | Explicit, resumable, diagnosable review lifecycle (statechart lineage) | (a) | Harel1987; LangGraph | committed — §3 row 7 |
+| C8 | Baseline anchors for B1–B5 (mapping table) | (a) | per row | committed — §3 mapping table |
+| C9 | Metric mapping vs literature metrics | (a) prose; numeric counterpart **not claimed** | Li2022, Lu2021, Tufano2019 | committed — §3 metric table + class-(b) determination above |
+| C10 | Executed B1–B5 / A1–A6 numbers | own run only; **no literature comparison** | — | `docs/EXPERIMENTS.md` §9 |
+| C11 | "Liang et al., *Code Reviews with LLMs*" (pre-existing entry) | — | unresolvable | **dropped** at verification (recorded above) |
 
 ## 4. Evaluation plan
 

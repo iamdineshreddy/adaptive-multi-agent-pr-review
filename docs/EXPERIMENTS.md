@@ -143,8 +143,7 @@ What the harness deliberately does **not** claim:
   come from the labelled corpus, so the harness measures the selection layer
   deterministically and offline.
 
-**Phase 17 part 2 (harness + corpus chain done; literature comparison still
-outstanding):**
+**Phase 17 part 2 (harness + corpus chain + literature comparison done):**
 
 - Plotting tooling is **authored and executed (verification-only)**: the
   `plots` extra (`backend/pyproject.toml`) brings in matplotlib
@@ -159,8 +158,10 @@ outstanding):**
 - **Real-corpus chain executed (done):** ingestion + license review (§8), the
   annotation pass (§1a), pass-2 ingest → `preprocess.py` → `run_all.py` on
   `datasets/annotation/pass2/raw.jsonl` → artifacts + re-rendered plots under
-  `experiments/results/` (§9). Still pending: literature comparison of the §2
-  baselines and §1 label evidence against cited works at reporting time.
+  `experiments/results/` (§9). Literature comparison: **executed** per
+  `docs/RESEARCH.md` §3 — verified bibliography, class-(a) prose comparisons
+  for the §2 baselines and §1 label evidence, class-(b) determination (no
+  cross-corpus numeric claim), and the claims ledger.
 
 **Harness corrections made during the first real run (disclosed):**
 
@@ -186,7 +187,7 @@ ARUM §5/§7 — no metric definition, baseline or ablation was redefined.
 ## 8. Dataset & licensing status (Phase 17 part 2)
 
 - **License review done.** The primary corpus is the Li et al. **CodeReview**
-  archive (EMNLP 2022 / arXiv:2203.09095) on Zenodo:
+  archive (ESEC/FSE 2022 / arXiv:2203.09095, DOI `10.1145/3540250.3549081`) on Zenodo:
   <https://zenodo.org/records/6900648> (DOI `10.5281/zenodo.6900648`, license
   field verified **CC-BY-4.0** via the Zenodo REST API); collection provenance,
   ingest-time gates (gitignored raw, per-component provenance hash, attribution,

@@ -24,7 +24,7 @@ pass.
 | 14 | Observability: Langfuse traces, Prometheus metrics, Grafana dashboards, structured logs | **done** (structured logs + Prometheus metrics + Grafana provisioning + Langfuse tracing; see split note below) |
 | 15 | Security hardening: auth, authz, rate limiting, injection defences, secret handling, audit | **done** (bearer-token authn/authz, feedback gating + list scoping, body cap, admin write actions + audit trail, see split notes below) |
 | 16 | Testing: unit, integration, API, queue, agent, DB, RAG, adaptive, webhook; failure scenarios | **part 1 done + part 2 authored** (worker-crash/restarted-in-flight live suite authored; exec pending Phase 18 stack — see split note below) |
-| 17 | Experiments: dataset (`github-codereview`) preprocessing, baselines, ablation, results, plots | **part 1 done + part 2 in progress** (plotting tooling authored + verification-only execution; dataset exec pending — see split note below) |
+| 17 | Experiments: dataset (`github-codereview`) preprocessing, baselines, ablation, results, plots | **done** (real-corpus run executed — results/figures under `experiments/results/`, table in `docs/EXPERIMENTS.md` §9; literature comparison executed per `docs/RESEARCH.md` §3; plot tooling also executed verification-only) |
 | 18 | Deployment: docker-compose (api/worker/scheduler/redis/postgres/frontend/prometheus/grafana) | **part 1 done + part 2 authored** (boot-smoke suite authored, self-skips; exec pending a Docker host — see split note below) |
 | 19 | Research documentation: ARCHITECTURE.md refinement, RESEARCH.md, EXPERIMENTS.md, final README | **done** (ARCHITECTURE.md aligned to the implemented system incl. the honest no-false-publication checkpoint; RESEARCH.md fleshed out — research questions, cited related-work plan with verification rule, evaluation plan, limitations, ethics, paper scaffold; EXPERIMENTS.md dataset/licensing + related-work anchor; README.md refreshed — cleaned diagram, accurate layout/status, quickstart, integrity statement; all deferred parts remain explicitly pending — no invented numbers or publication claims) |
 
@@ -148,7 +148,7 @@ stays the system of record; restart recovery re-stages through the same ingest
 path (`stage_review_to_priority` + DB score loader) and the review is handed to
 fan-out exactly once — the no-duplicate-restart and priority-order-preserved
 across recovery follow-ups pin the contract. The suite self-skips without
-Postgres+Redis exactly like its siblings (534 passed / 20 skipped locally).
+Postgres+Redis exactly like its siblings (578 passed / 19 skipped locally).
 **Execution of the scenarios (and the broker-transport integration run) is
 pending the Phase 18 Compose stack — no executed result is claimed until then
 (README integrity rule).**
@@ -165,8 +165,9 @@ A1..A6 baselines/ablations as declarative mode switches executed through the
 pipeline), CSV/JSON results and the ablation-vs-B5 delta table, and the
 end-to-end runner tests (`tests/test_experiments_*.py`; 39 new harness tests).
 Results on the bundled smoke corpus are explicitly flagged as
-verification-only, never research numbers. **Part 2** (in progress): the
-plotting tooling is authored and executed verification-only — the `plots`
+verification-only, never research numbers. **Part 2** (done): the
+plotting tooling is authored and executed verification-only on the bundled
+sample — the `plots`
 extra (matplotlib via `backend/app/experiments/plots.py`) and the thin CLI
 `experiments/run/plot_summary.py` render `plot_metrics.png` +
 `plot_deltas_vs_b5.png` from the harness artifacts with a baked-in
@@ -180,14 +181,17 @@ annotation overlay under the documented protocol, with machine-readable
 exclusions for anything the overlay does not cover (nothing inferred; 14 new
 tests, 534 total pass). The **literature-comparison protocol is authored**
 (`docs/RESEARCH.md` §3 — two claim classes, baseline→literature and metric
-mappings, cross-corpus-comparison prohibition). Remaining: downloading the
-corpus (per the license gates, connection currently too slow — deferred),
-an annotation pass over the extracted review-ids (per the
-datasets/README.md protocol), an executed run of the full table on the real
-corpus, quantitative (executed-numbers) literature comparison per the
-authored protocol, and re-rendering the figures from that run. Until the
-real-corpus run lands, every results table remains
-"Results pending experimental validation".
+mappings, cross-corpus-comparison prohibition). **Executed:** the corpus
+was downloaded under the license gates (CC-BY-4.0 verified via the Zenodo
+API), the two-pass annotation ran over the extracted review-ids (500 rows,
+Pass-B re-verification; assisted-annotation disclosure in
+`docs/EXPERIMENTS.md` §1a), pass-2 ingest → `preprocess.py` → `run_all.py`
+executed the full table on the real corpus (results, deltas, figures under
+`experiments/results/`; table transcribed in `docs/EXPERIMENTS.md` §9, wall
+clock in the execution block of `summary.json`), figures re-rendered from
+that run, and the literature comparison executed per the authored protocol
+(verified bibliography, class-(a) comparisons, class-(b) determination = no
+cross-corpus numeric claim, claims ledger — `docs/RESEARCH.md` §3).
 
 Phase 18 scope note (deliberate split): deployment assets are written and gated
 first; the live-stack proof (``docker compose up`` boot, a webhook ingestion
@@ -209,7 +213,7 @@ helper used by both endpoints). Tests: `tests/test_monitoring_worker_exporter.py
 compose boot smoke is authored (`tests/test_integration_compose_smoke.py` — 6
 scenarios: API/worker liveness, frontend, Prometheus targets, Grafana UI,
 bearer-gated metrics, webhook reachable/accepted; self-skips without Docker and
-exec on a Docker host, 534 passed / 20 skipped locally) plus the
+exec on a Docker host, 578 passed / 19 skipped locally) plus the
 broker-transport run deferred from Phase 16 part 2, which this stack finally
 provides the real broker for.
 
