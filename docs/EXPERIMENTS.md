@@ -1,7 +1,10 @@
 # Experiments & Evaluation
 
-Research design. **All results are pending experimental validation until scripts run.
-Nothing here reports fabricated numbers.**
+Research design + executed-run record. **Nothing here reports fabricated
+numbers.** The B1–B5 / A1–A6 table has been executed on the real corpus (§9);
+every number lives in `experiments/results/`, produced by
+`experiments/run/run_all.py` and never hand-edited. Metrics the harness cannot
+measure are reported as NOT MEASURED, never estimated.
 
 ---
 
@@ -29,6 +32,37 @@ Labels are PRE-PROCESSED to research-safe definitions (documented under
 
 Explicit rule: **"code changed" is never itself labelled "developer accepted"** (see
 `docs/Auth.md`; the labeller requires an explicit/arguable-mapped outcome).
+
+### 1a. Annotation methods (disclosure)
+
+The judgement fields for the seeded sample (`file_path`, `category`, `severity`,
+`implementation`, `explicit_outcome`) were filled by **assisted annotation**: an
+LLM annotator (model `big-pickle`, acting through the coding agent) applied the
+rubric in `datasets/ANNOTATION_GUIDELINES.md` using GitHub's own review records
+for each sampled PR as the evidence base (retrieved by
+`experiments/ingest/github_evidence.py`; path evidence exact 484 / fuzzy 10 /
+none 6 — none → row excluded, never guessed). This is a **model-assisted pass,
+not a human-annotated gold set**; a human re-check of a subset is recommended
+before publication. Rubric decisions that shape the labels:
+
+- **Rule Q** — a comment with no concrete change request gets
+  `implementation: null` and is classified only through `explicit_outcome`.
+- **Rule H** — `implementation` ∈ {verbatim, partial, modified, absent} with
+  confidence caps; bare `nit:` → info severity, `nit:` with rationale → low.
+- **Pass B (outcomes)** — `explicit_outcome` ∈ {accepted, dismissed, rejected,
+  null}: accepted = author confirms done / reviewer accepts the rationale;
+  **Rule B** additionally maps the comment author's later APPROVED or positive
+  verdict body ("LGTM", "Awesome!", ":shipit:") to their earlier comment's
+  subject — i.e. some acceptance evidence is PR-level rather than
+  comment-level (a disclosed rubric choice); dismissed = the reviewer retracts
+  their own suggestion or the review is DISMISSED; rejected = the author
+  explicitly declines with no reviewer withdrawal; otherwise `null` → excluded
+  as `changed_unclassified`.
+
+Pass-B totals over the 58 rows carrying an outcome: 40 accepted, 5 dismissed,
+2 rejected, 11 null (excluded). Four sampled rows carry archive-corrupted
+hunks (Varnish 503 text in the source archive — a genuine dataset defect);
+their judgements rest on thread evidence and are recorded as a limitation.
 
 Other datasets: candidates are `CodeReviewer`, `Review-Reviewer`, security-focused
 bench packs (e.g. OWASP-context datasets). Licensing is documented in
@@ -109,7 +143,8 @@ What the harness deliberately does **not** claim:
   come from the labelled corpus, so the harness measures the selection layer
   deterministically and offline.
 
-**Phase 17 part 2 (in progress):**
+**Phase 17 part 2 (harness + corpus chain done; literature comparison still
+outstanding):**
 
 - Plotting tooling is **authored and executed (verification-only)**: the
   `plots` extra (`backend/pyproject.toml`) brings in matplotlib
@@ -121,13 +156,30 @@ What the harness deliberately does **not** claim:
   (`experiments/results/*`, only `.gitkeep` tracked). The pure data layer
   (`load_summary`/`render_figures`) is covered by `tests/test_experiments_plots.py`
   (8 tests) and the renderer self-describes when the extra is missing.
-- Still pending: `github-codereview` ingestion (license review + preprocessing
-  of the real corpus under `datasets/README.md`) and an executed run of the
-  full table; literature comparison of the §2 baselines and the §1 label
-  evidence (with citations). The plots will be re-rendered from the real run
-  (without the verification footnote) once that passes.
+- **Real-corpus chain executed (done):** ingestion + license review (§8), the
+  annotation pass (§1a), pass-2 ingest → `preprocess.py` → `run_all.py` on
+  `datasets/annotation/pass2/raw.jsonl` → artifacts + re-rendered plots under
+  `experiments/results/` (§9). Still pending: literature comparison of the §2
+  baselines and §1 label evidence against cited works at reporting time.
 
-All numbers outside part 2 remain "Results pending experimental validation".
+**Harness corrections made during the first real run (disclosed):**
+
+1. **Publication set (bug fix).** `runner._outcome` counted every candidate
+   handed to selection as published — it ignored each decision's `selected`
+   flag — so budgets/gates could never move the ARUM §5 ratios (comment
+   reduction and false-positive rate were structurally 0 and recall
+   structurally 1). Fixed to count only decisions flagged `selected`;
+   regression test
+   `test_budget_is_per_review_and_metrics_use_publication_set`.
+2. **Budget scope (conformance fix).** The harness invoked `select_decisions`
+   once over the whole corpus, applying the cap corpus-wide. ARUM §7 and the
+   production orchestrator define the budget **per review**, so `_select` now
+   groups by `review_id` and applies cap/gates per review (the regression test
+   pins both halves: 2 selected per review, not 2 corpus-wide; 4 of 6
+   published, not all 6).
+
+Both fixes make the code match the metric and budget definitions already in
+ARUM §5/§7 — no metric definition, baseline or ablation was redefined.
 
 ---
 
@@ -149,10 +201,38 @@ All numbers outside part 2 remain "Results pending experimental validation".
   `run_all.py` executes (verification-only). Each overlay entry's
   `implementation`/`explicit_outcome` is an annotation judgement, not a
   pipeline inference (docs/Auth.md).
-- The corpus is **not yet downloaded or ingested**: `datasets/raw/` is gitignored
-  and the full-table run awaits the download step plus an annotation pass over
-  the extracted review-ids per the protocol above (license + provenance hash per
-  component per the gates above).
+- **Corpus downloaded and verified; mapping approved and implemented.**
+  `Code_Refinement.zip` (1,168,582,011 bytes, MD5 matches Zenodo) is extracted
+  under gitignored `datasets/raw/Code_Refinement/` (`ref-train/valid/test.jsonl`,
+  13,104 rows in `ref-test`). The archive/schema mismatch (no `file_path`, field
+  names `ghid`/`comment`/`old`/`new`) was resolved in
+  `datasets/DATASET_MAPPING_PROPOSAL.md` with evidence V1–V7 — including paper
+  §3.3 confirmation that `new` is an **observed later commit**, not a synthesised
+  target — and applied to `ingest.py`: PR-level `review_id` (`{repo}#{ghid}`),
+  per-comment `annotation_key` for the overlay, `file_path` as an annotation
+  field, line numbers from the old side of `hunk`.
+- **Pass 1 executed on the real corpus sample:** seeded PR-cluster sample of 500
+  rows / 426 PRs (55 multi-comment PRs) from `ref-test.jsonl` →
+  `datasets/annotation/` (`sample.jsonl`, `annotation_required.jsonl`,
+  `annotation_draft.jsonl` with every judgement field null, `aid_manifest.json`);
+  ingest CLI confirms 500/500 excluded as `annotation_required` with DOI +
+  archive sha256 in the manifest. Sampling, aid and mapper are covered by
+  tests (determinism, no-prefill, key agreement).
+- **Full table executed (done):** annotation pass (§1a) → 500 judgements →
+  494 rows with resolvable `file_path` → pass-2 ingest (`pass2/manifest.json`
+  carries DOI + license + archive sha256 + `annotation_provenance`) →
+  `preprocess.py` (494 → 483 labelled rows, 11 `changed_unclassified`,
+  corpus sha256 `d74e66f9…`) → `run_all.py` (§9). Corpus limits measured
+  during that run and stated in the results: `implemented_later` is constant
+  `True` by construction; no review rounds exist (A5 ≡ B5 by construction,
+  measured delta 0); only 176/10,712 PRs share a line bucket and the sampled
+  reviews hold at most 4 candidate groups each, so the per-review budget of 10
+  never binds (`truncated_by_budget = 0` in every run); there are no `critical`
+  rows and no redundancy group ≥ 3 members, so the mandatory/suppression gates
+  never fire (protected = 2, mandatory = 0, suppressed = 0); `IGNORED` is
+  unreachable in this sample (no-response rows become `changed_unclassified`);
+  6 rows were excluded for unresolvable paths and 4 rows have corrupted hunks
+  in the source archive.
 - The bundled `experiments/samples` corpus is a smoke fixture produced by hand
   (5 reviews / 21 comments) — it evidences pipeline behaviour, not results.
 - Related-work comparison targets are listed in `docs/RESEARCH.md` §3.
@@ -163,3 +243,68 @@ All numbers outside part 2 remain "Results pending experimental validation".
   against a cited work will cite the specific work and satisfy the protocol at
   the time of the run; numeric cells stay "no executed run — results pending"
   until then.
+
+---
+
+## 9. Executed run (real corpus)
+
+Commands (reproduce every artifact; the numbers below are transcribed verbatim
+from `experiments/results/summary.csv` — never hand-edited):
+
+```text
+python experiments/run/run_all.py --corpus datasets/annotation/pass2/raw.jsonl --seed 0 --results-dir experiments/results
+python experiments/run/plot_summary.py --results-dir experiments/results --label "github-codereview pass2 (494 annotated records), seed 0 - LLM-assisted annotation, see docs/EXPERIMENTS.md"
+```
+
+Artifacts: `experiments/results/{summary.csv, summary.json, runs/*.json,
+plot_metrics.png, plot_deltas_vs_b5.png}` (gitignored, regenerable). Execution
+block: seed 0, Python 3.11.0, commit `1b8bbb2` (dirty), offline
+selection-layer harness — no LLM invoked. Corpus: 494 rows / 483 included /
+11 excluded, raw sha256 `d74e66f998bbb672fd88ff5b5811f35a12d927e07801baebbdd873cc7115046c`.
+
+| mode | Precision | Recall | F1 | FPR | Comment red. | Redundancy red. | Acceptance | Actionability | selected | candidates |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| B1 | 0.000000 | 0.000000 | 0.000000 | 0.000000 | 0.000000 | 0.000000 | 0.000000 | n/a | 0 | 0 |
+| B2 | 0.860996 | 1.000000 | 0.925307 | 0.000000 | 0.000000 | 0.002070 | 0.860996 | 0.981328 | 482 | 482 |
+| B3 | 0.860996 | 1.000000 | 0.925307 | 0.000000 | 0.000000 | 0.002070 | 0.860996 | 0.981328 | 482 | 482 |
+| B4 | 0.860996 | 1.000000 | 0.925307 | 0.000000 | 0.000000 | 0.002070 | 0.860996 | 0.981328 | 482 | 482 |
+| B5 | 0.860996 | 1.000000 | 0.925307 | 0.000000 | 0.000000 | 0.002070 | 0.860996 | 0.981328 | 482 | 482 |
+| A1 | 0.860996 | 1.000000 | 0.925307 | 0.000000 | 0.000000 | 0.002070 | 0.860996 | 0.981328 | 482 | 482 |
+| A2 | 0.860996 | 1.000000 | 0.925307 | 0.000000 | 0.000000 | 0.002070 | 0.860996 | 0.981328 | 482 | 482 |
+| A3 | 0.861284 | 1.000000 | 0.925473 | 0.000000 | 0.000000 | 0.000000 | 0.861284 | 0.981366 | 483 | 483 |
+| A4 | 0.860996 | 1.000000 | 0.925307 | 0.000000 | 0.000000 | 0.002070 | 0.860996 | 0.981328 | 482 | 482 |
+| A5 | 0.860996 | 1.000000 | 0.925307 | 0.000000 | 0.000000 | 0.002070 | 0.860996 | 0.981328 | 482 | 482 |
+| A6 | 0.860996 | 1.000000 | 0.925307 | 0.000000 | 0.000000 | 0.002070 | 0.860996 | 0.981328 | 482 | 482 |
+
+Reading the table (measured, not assumed):
+
+- **B1 is NOT MEASURABLE on this corpus.** Its filter `reviewer == "primary"`
+  matches 0 rows because the approved mapping (`datasets/DATASET_MAPPING_PROPOSAL.md`
+  D5) attributes every row to one of the five agent keys; the `0.000000` cells
+  are zero-division artifacts of an empty configuration, **not** a performance
+  result. Disposition: reported as not measurable (no mode redefinition).
+- **B2–B5 and A1/A2/A4/A5/A6 are numerically identical because the corpus
+  leaves the adaptive layers nothing to act on** (all counters measured): the
+  per-review budget of 10 never binds (max 4 candidate groups per review,
+  `truncated_by_budget = 0`), the mandatory gate finds no `critical` row, the
+  suppression gate needs a redundancy group ≥ 3 (max group size 2) plus
+  low severity/confidence, and ranking changes (memory/RAG/learned weights/
+  disagreement) only reorder a set that is published in full. Recall = 1.0
+  because nothing real is ever withheld; comment reduction = 0 because the
+  budget never truncates; FPR = 0 because nothing is suppressed.
+- **A3 is the only ablation with a measured delta:** dedup off → 483
+  candidates (+1 redundant member), redundancy reduction 0.002070 → 0.000000,
+  precision +0.000288, F1 +0.000166, actionability +0.000038 (delta table in
+  `summary.json`).
+- **A5 ≡ B5**: no review rounds exist in the dataset (D6), measured delta 0.
+
+**NOT MEASURED** (harness is selection-layer only, §7 — reported, never
+estimated): review latency, token usage, estimated cost, queue throughput,
+iteration efficiency (agent-layer metrics), and NDCG / MRR / findings-per-PR
+(no ARUM §5 definition exists for them). Redundancy *rate* and findings per PR
+at candidate level are derivable from the artifacts; the ratios above cover the
+§3 metric list that `metrics.py` implements.
+
+Determinism: for seed 0 every `runs/*.json` payload is byte-identical across
+reruns (no timestamps inside `run_mode`; the timestamp lives only in the
+`execution` block of `summary.json`).
