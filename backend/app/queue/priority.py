@@ -67,7 +67,18 @@ class RedisPriorityStore:
         await self._client.zadd(self._key, {make_member(ordinal, review_id): score})
 
     async def pop_highest(self) -> PriorityEntry | None:
-        member_scores = await self._client.zrange(self._key, 0, 0, withscores=True)
+        # Highest score first (QUEUE.md §2 "pops the highest-priority review").
+        # ``zrange(0, 0)`` returns the *lowest* score, so the top member is read
+        # in reverse and the tie-break is then resolved ascending: equal scores
+        # are ordered lexicographically, and the member encodes the FIFO ordinal
+        # as its prefix, so the smallest ordinal (= oldest) wins a tie.
+        top = await self._client.zrevrange(self._key, 0, 0, withscores=True)
+        if not top:
+            return None
+        max_score = top[0][1]
+        member_scores = await self._client.zrangebyscore(
+            self._key, max_score, max_score, start=0, num=1, withscores=True
+        )
         if not member_scores:
             return None
         member, score = member_scores[0]

@@ -272,3 +272,49 @@ async def test_priority_store_via_redis() -> None:
         assert await store.size() == 1
     finally:
         await store.aclose()
+
+
+async def test_priority_store_pops_highest_then_fifo_ties_via_redis() -> None:
+    """Highest score pops first; equal scores pop in FIFO ordinal order (QUEUE.md §2).
+
+    Regression guard: ``pop_highest`` used to read ``zrange(0, 0)`` (the *lowest*
+    score), which inverted the dispatch order under a live broker.
+    """
+    import redis.asyncio as redis
+
+    from app.queue.priority import RedisPriorityStore
+
+    client = redis.Redis.from_url(get_settings().redis_url)
+    try:
+        await client.ping()
+    except Exception as exc:  # pragma: no cover - environment dependent
+        pytest.skip(
+            f"Redis not reachable at {get_settings().redis_url} "
+            f"({type(exc).__name__}); skipping priority-store test."
+        )
+    finally:
+        await client.aclose()
+
+    store = RedisPriorityStore()
+    try:
+        await store.reset()
+        older, newer, higher = uuid.uuid4(), uuid.uuid4(), uuid.uuid4()
+        await store.enqueue(older, 5.0, 7)
+        await store.enqueue(newer, 5.0, 9)
+        await store.enqueue(higher, 6.0, 8)
+
+        first = await store.pop_highest()
+        assert first is not None
+        assert first.review_id == higher
+        assert first.score == 6.0
+
+        tie_a = await store.pop_highest()
+        tie_b = await store.pop_highest()
+        assert tie_a is not None and tie_b is not None
+        # equal score -> the smaller FIFO ordinal (older enqueue) wins
+        assert [tie_a.review_id, tie_b.review_id] == [older, newer]
+        assert [tie_a.ordinal, tie_b.ordinal] == [7, 9]
+        assert await store.size() == 0
+        assert await store.pop_highest() is None
+    finally:
+        await store.aclose()
