@@ -43,7 +43,7 @@ The decision layer is implemented as a measurable scoring mechanism called the
 **Adaptive Review Utility Model (ARUM)** — not as an unstructured "ask the LLM to rank
 everything" prompt.
 
-See `docs/ARUM.md`.
+See [docs/ARUM.md](docs/ARUM.md).
 
 ---
 
@@ -80,7 +80,7 @@ GitHub PR (webhook event)
   Next review  -> iterative re-review of changed regions only
 ```
 
-Full details: `docs/ARCHITECTURE.md`.
+Full details: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 
 ---
 
@@ -112,7 +112,7 @@ Full details: `docs/ARCHITECTURE.md`.
 
 ## Quick start
 
-See `docs/SETUP.md` and `docs/DEPLOYMENT.md`.
+See [docs/SETUP.md](docs/SETUP.md) and [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md).
 
 Local:
 
@@ -174,13 +174,13 @@ docker-compose.yml      Full platform stack
 ## Current status
 
 All roadmap phases are implemented and gated except the parts that are
-explicitly **deferred to a part 2** (documented in `docs/ROADMAP.md`, never
+explicitly **deferred to a part 2** (documented in [docs/ROADMAP.md](docs/ROADMAP.md), never
 silently cut):
 
 - **Phases 0–15** done: design, ingestion, queue, agents, orchestration,
   consolidation, ARUM, budget gates, memory+RAG, feedback+learning, iterative
   review, dashboard, observability, security.
-- **Phase 16 part 1** done: QA gates codified — `docs/TESTING.md` (suite lanes,
+- **Phase 16 part 1** done: QA gates codified — [docs/TESTING.md](docs/TESTING.md) (suite lanes,
   gate commands, live-service self-skip), failure-scenario coverage map, queue /
   webhook / pipeline test seams. **Part 2** (worker-crash / restarted-in-flight
   scenario) authored as a live-gated self-skip suite; its execution and the
@@ -200,26 +200,26 @@ silently cut):
   CodeReview archive, Zenodo, CC-BY-4.0 — `datasets/README.md`) was
   downloaded, ingested, and annotated, and the full run
   (`run_all.py --corpus datasets/annotation/pass2/raw.jsonl --seed 0`)
-  produced the results table in `docs/EXPERIMENTS.md` §9; figures render
+  produced the results table in [docs/EXPERIMENTS.md](docs/EXPERIMENTS.md) §9; figures render
   with a baked-in footnote (PNGs/CSVs gitignored).
 - **Phase 18 part 1** done: Docker Compose topology, images, worker metrics
   exporter, beat scheduler, deployment runbook. **Part 2** in progress: the
   live `docker compose up` boot smoke is authored (`tests/test_integration_compose_smoke.py`,
   6 scenarios, self-skips) — execution plus the Phase 16 part 2 broker run still
   need a Docker host and have not been executed.
-- **Phase 19** done: this README, `docs/ARCHITECTURE.md` refinement,
-  `docs/RESEARCH.md`, `docs/EXPERIMENTS.md` finalisation.
+- **Phase 19** done: this README, [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) refinement,
+  [docs/RESEARCH.md](docs/RESEARCH.md), [docs/EXPERIMENTS.md](docs/EXPERIMENTS.md) finalisation.
 
 **Nothing not implemented is claimed.** Quantities that no harness output
 measures (latency, tokens, cost, queue throughput, NDCG/MRR) stay labelled
-"NOT MEASURED" in `docs/EXPERIMENTS.md`; the B1 row is "NOT MEASURED"
+"NOT MEASURED" in [docs/EXPERIMENTS.md](docs/EXPERIMENTS.md); the B1 row is "NOT MEASURED"
 (0 trainable candidates). Live Docker/GitHub E2E validation requires
 infrastructure not available in this environment.
 
 Suite today: **578 passed / 19 skipped** (13 PostgreSQL-dependent, 6
 Compose-smoke — all lanes self-skip when the services are unreachable),
 ruff + ruff-format + strict mypy clean, 85% line coverage over
-`backend/app`. See `docs/TESTING.md`.
+`backend/app`. See [docs/TESTING.md](docs/TESTING.md).
 
 ---
 
@@ -227,19 +227,19 @@ ruff + ruff-format + strict mypy clean, 85% line coverage over
 
 | Document | Purpose |
 | --- | --- |
-| `docs/ARCHITECTURE.md` | System architecture, components, data flow, decision log |
-| `docs/ARUM.md` | Adaptive Review Utility Model design |
-| `docs/DATABASE.md` | PostgreSQL ER design, indexes, migrations |
-| `docs/API.md` | HTTP API specification |
-| `docs/QUEUE.md` | Queue architecture and priority policy |
-| `docs/AGENTS.md` | Agent design, prompts policy, outputs |
-| `docs/ROADMAP.md` | Development phases, status, split notes |
-| `docs/EXPERIMENTS.md` | Evaluation methodology, baselines, ablation |
-| `docs/RESEARCH.md` | Research positioning, related work, integrity statement |
-| `docs/SECURITY.md` | Security model and threat considerations |
-| `docs/TESTING.md` | QA gates, suite lanes, coverage baseline |
-| `docs/SETUP.md` | Local development setup |
-| `docs/DEPLOYMENT.md` | Compose deployment + operations runbook |
+| [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | System architecture, components, data flow, decision log |
+| [docs/ARUM.md](docs/ARUM.md) | Adaptive Review Utility Model design |
+| [docs/DATABASE.md](docs/DATABASE.md) | PostgreSQL ER design, indexes, migrations |
+| [docs/API.md](docs/API.md) | HTTP API specification |
+| [docs/QUEUE.md](docs/QUEUE.md) | Queue architecture and priority policy |
+| [docs/AGENTS.md](docs/AGENTS.md) | Agent design, prompts policy, outputs |
+| [docs/ROADMAP.md](docs/ROADMAP.md) | Development phases, status, split notes |
+| [docs/EXPERIMENTS.md](docs/EXPERIMENTS.md) | Evaluation methodology, baselines, ablation |
+| [docs/RESEARCH.md](docs/RESEARCH.md) | Research positioning, related work, integrity statement |
+| [docs/SECURITY.md](docs/SECURITY.md) | Security model and threat considerations |
+| [docs/TESTING.md](docs/TESTING.md) | QA gates, suite lanes, coverage baseline |
+| [docs/SETUP.md](docs/SETUP.md) | Local development setup |
+| [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md) | Compose deployment + operations runbook |
 
 ---
 
@@ -248,6 +248,6 @@ ruff + ruff-format + strict mypy clean, 85% line coverage over
 The complete project incl. dataset (`github-codereview`), baselines, ablation studies,
 and reproducible experiment scripts is documented. **No experimental results will be
 fabricated.** If an experiment has not been executed, the corresponding report states
-"Results pending experimental validation". See `docs/RESEARCH.md` for the contribution
+"Results pending experimental validation". See [docs/RESEARCH.md](docs/RESEARCH.md) for the contribution
 statement and citation policy.
 
