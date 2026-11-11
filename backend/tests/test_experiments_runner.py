@@ -99,7 +99,7 @@ def test_b2_publishes_everything_with_dedup_only() -> None:
 # --- B1: single reviewer only ---------------------------------------------
 
 
-def test_b1_restricts_to_single_reviewer() -> None:
+def test_b1_publishes_all_raw_findings() -> None:
     corpus = build_corpus(
         [
             _rec(
@@ -109,7 +109,7 @@ def test_b1_restricts_to_single_reviewer() -> None:
                 "security/xss",
                 "high",
                 0.9,
-                "primary",
+                "security",
                 implemented=True,
                 implementation="verbatim",
             ),
@@ -118,15 +118,15 @@ def test_b1_restricts_to_single_reviewer() -> None:
         source="t",
     )
     payload = run_mode(corpus, BASELINES["B1"], seed=0)
-    assert payload["candidates"] == 1  # only the primary-reviewer row
+    # B1 now publishes every raw finding (no dedup, no cap) instead of
+    # filtering by a non-existent "primary" reviewer.
+    assert payload["candidates"] == 2
+    assert payload["measurable"] is True
 
 
-def test_b1_without_primary_rows_is_not_measurable() -> None:
+def test_b1_on_empty_corpus_is_not_measurable() -> None:
     """Zero-division artifacts must not be presented as measured scores."""
-    corpus = build_corpus(
-        [_rec("v1", "b.py", 40, "quality/maintainability", "medium", 0.6, "quality")],
-        source="t",
-    )
+    corpus = build_corpus([], source="t")
     payload = run_mode(corpus, BASELINES["B1"], seed=0)
     assert payload["candidates"] == 0
     assert payload["measurable"] is False

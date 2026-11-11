@@ -14,7 +14,7 @@ from dataclasses import dataclass, replace
 
 # settings.review_budget_medium (docs/ADAPTIVE.md, app/config/settings.py:76).
 DEFAULT_BUDGET = 10
-SINGLE_REVIEWER = "primary"
+SINGLE_REVIEWER = None
 
 
 @dataclass(frozen=True)
@@ -49,9 +49,8 @@ class ModeConfig:
 BASELINES: dict[str, ModeConfig] = {
     "B1": ModeConfig(
         "B1",
-        "single reviewer, all findings (cap = none)",
-        single_reviewer=SINGLE_REVIEWER,
-        dedup_only=True,
+        "single pass, all findings (no dedup, no cap)",
+        dedup_only=False,
     ),
     "B2": ModeConfig(
         "B2",

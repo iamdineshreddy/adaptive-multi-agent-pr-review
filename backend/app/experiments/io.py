@@ -18,6 +18,8 @@ METRIC_KEYS = (
     "redundancy_reduction",
     "acceptance_rate",
     "actionability",
+    "ndcg_at_5",
+    "mrr",
 )
 
 

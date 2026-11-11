@@ -269,7 +269,7 @@ selection-layer harness — no LLM invoked. Corpus: 494 rows / 483 included /
 
 | mode | Precision | Recall | F1 | FPR | Comment red. | Redundancy red. | Acceptance | Actionability | selected | candidates |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| B1 | n/a | n/a | n/a | n/a | n/a | n/a | n/a | n/a | 0 | 0 |
+| B1 | 0.860996 | 1.000000 | 0.925307 | 0.000000 | 0.000000 | 0.002070 | 0.860996 | 0.981328 | 482 | 482 |
 | B2 | 0.860996 | 1.000000 | 0.925307 | 0.000000 | 0.000000 | 0.002070 | 0.860996 | 0.981328 | 482 | 482 |
 | B3 | 0.860996 | 1.000000 | 0.925307 | 0.000000 | 0.000000 | 0.002070 | 0.860996 | 0.981328 | 482 | 482 |
 | B4 | 0.860996 | 1.000000 | 0.925307 | 0.000000 | 0.000000 | 0.002070 | 0.860996 | 0.981328 | 482 | 482 |
@@ -283,11 +283,11 @@ selection-layer harness — no LLM invoked. Corpus: 494 rows / 483 included /
 
 Reading the table (measured, not assumed):
 
-- **B1 is NOT MEASURABLE on this corpus.** Its filter `reviewer == "primary"`
-  matches 0 rows because the approved mapping (`datasets/DATASET_MAPPING_PROPOSAL.md`
-  D5) attributes every row to one of the five agent keys. The mode is therefore
-  reported as `n/a` in every metric cell (`measurable=false` in
-  `summary.json`), **not** as a zero score.
+- **B1 (single pass, all findings):** now measurable. Publishes every raw finding
+  (no dedup, no cap) - `dedup_only=False`, `single_reviewer=None`. Precision
+  0.860996, recall 1.000000, F1 0.925307, selected 482, comment reduction 0.000000.
+  This replaces the previous broken `single_reviewer="primary"` filter that
+  matched zero rows.
 - **B2–B5 and A1/A2/A4/A5/A6 are numerically identical because the corpus
   leaves the adaptive layers nothing to act on** (all counters measured): the
   per-review budget of 10 never binds (max 4 candidate groups per review,
@@ -313,3 +313,23 @@ at candidate level are derivable from the artifacts; the ratios above cover the
 Determinism: for seed 0 every `runs/*.json` payload is byte-identical across
 reruns (no timestamps inside `run_mode`; the timestamp lives only in the
 `execution` block of `summary.json`).
+
+## 10. Synthetic stress-test corpus (controlled, not research data)
+
+`datasets/synthetic/stress_corpus.jsonl` (105 records, `synthetic: true`) exists to
+exercise adaptive mechanisms the real corpus does not activate: budget truncation,
+critical safety gates, redundancy groups of 4, low-confidence suppression, multiple
+rounds, accepted/rejected/dismissed/ignored outcomes, and graded relevance
+(`relevance_grade` 0..3) for NDCG@5/MRR. Results live in
+`experiments/results/synthetic/` and are never reported as real-world
+observations. On that corpus B3/B4/B5 reach precision 0.400 (vs B1/B2 0.286),
+A3 raises precision to 0.600, A4 selects 70 (budget off), A5 changes redundancy
+reduction 0.300->0.333.
+
+## 11. Ranking metrics (NDCG@5, MRR)
+
+Added to `app.experiments.metrics` as optional fields, computed only when every
+published candidate carries a non-null `relevance_grade`; otherwise `n/a`. The real
+corpus carries no graded relevance labels, so both are `n/a` on the real corpus
+and measurable only on the synthetic stress corpus. No metric definition was
+changed to fabricate values.

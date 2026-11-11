@@ -425,6 +425,15 @@ def _outcome(
     not_published = [
         c for c in candidates if _candidate_finding_id(c) not in published_ids
     ]
+    # Ordered publication list (selection returns decisions in rank order) for
+    # ranking metrics (NDCG@5, MRR). Only computable when every published
+    # candidate carries a graded relevance label.
+    candidate_by_finding = {_candidate_finding_id(c): c for c in candidates}
+    ordered_published_grades: tuple[int | None, ...] = tuple(
+        candidate_by_finding[d.finding_id].representative.relevance_grade
+        for d in selected
+        if d.selected and d.finding_id in candidate_by_finding
+    )
     return RunOutcome(
         mode_key=mode_key,
         raw_count=len(candidates),
@@ -443,6 +452,7 @@ def _outcome(
             1 for c in published if c.representative.actionable is not None
         ),
         outcome_total=outcome_total(corpus.label_counts),
+        published_ordered_grades=ordered_published_grades,
     )
 
 

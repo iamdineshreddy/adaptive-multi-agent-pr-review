@@ -298,6 +298,19 @@ python scripts/live_e2e.py --repo iamdineshreddy/adaptive-multi-agent-pr-review 
 
 ---
 
+## 7b. Research evaluation improvements (second phase)
+
+- Audited B1/B2-B5: B1's `single_reviewer="primary"` matched zero rows; fixed
+  to a measurable single-pass baseline (no dedup, no cap).
+- Added optional NDCG@5 and MRR (graded relevance only); real corpus reports
+  `n/a` (no grades).
+- Added `relevance_grade` to corpus schema (optional, 0..3).
+- Added synthetic stress corpus (`datasets/synthetic/stress_corpus.jsonl`, 105
+  records, `synthetic: true`) + generator; results in
+  `experiments/results/synthetic/`. Demonstrates budget/redundancy/iteration
+  effects that the real corpus does not activate.
+- Regenerated real-corpus results; B1 now 0.860996 (was n/a).
+
 ## 8. Files changed (summary)
 
 New: `backend/app/agents/offline.py`, `backend/alembic/versions/0009_repository_defaults.py`,

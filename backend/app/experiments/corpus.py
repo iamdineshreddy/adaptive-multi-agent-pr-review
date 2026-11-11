@@ -44,6 +44,7 @@ class LabeledRow:
     comment: str
     suggested_fix: str | None
     actionable: bool | None
+    relevance_grade: int | None
     group_key: str
     content_hash: str
     label: str | None
@@ -149,12 +150,22 @@ def _validate(record: Mapping[str, Any]) -> None:
     memory = record.get("memory")
     if memory is not None and not isinstance(memory, dict):
         raise CorpusError("memory must be a JSON object when present")
+    grade = record.get("relevance_grade")
+    if grade is not None:
+        try:
+            grade_int = int(grade)
+        except (TypeError, ValueError) as exc:
+            raise CorpusError(f"relevance_grade must be an int, got {grade!r}") from exc
+        if not 0 <= grade_int <= 3:
+            raise CorpusError(f"relevance_grade must be 0..3, got {grade_int}")
 
 
 def _to_row(record: Mapping[str, Any], result: LabelResult) -> LabeledRow:
     line_start = _optional_int(record.get("line_start"))
     line_end = _optional_int(record.get("line_end"))
     actionable = _optional_bool(record.get("actionable"))
+    grade_raw = record.get("relevance_grade")
+    relevance_grade = None if grade_raw is None else int(grade_raw)
     return LabeledRow(
         review_id=str(record["review_id"]),
         file_path=str(record["file_path"]),
@@ -168,6 +179,7 @@ def _to_row(record: Mapping[str, Any], result: LabelResult) -> LabeledRow:
         comment=str(record["comment"]),
         suggested_fix=_optional_str(record.get("suggested_fix")),
         actionable=actionable,
+        relevance_grade=relevance_grade,
         group_key=_group_key(
             str(record["review_id"]),
             str(record["file_path"]),

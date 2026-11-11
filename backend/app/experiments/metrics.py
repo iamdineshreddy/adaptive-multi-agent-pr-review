@@ -9,7 +9,8 @@ include ``MODIFIED`` (partially adopted) per §1.
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+import math
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 
 
@@ -30,6 +31,7 @@ class RunOutcome:
     actionable_published: int  # published with a root-caused fix
     actionable_known: int  # published where an actionable flag exists
     outcome_total: int  # labelled outcomes in the corpus (acceptance-rate base)
+    published_ordered_grades: tuple[int | None, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -42,6 +44,8 @@ class Metrics:
     redundancy_reduction: float | None
     acceptance_rate: float | None
     actionability: float | None
+    ndcg_at_5: float | None = None
+    mrr: float | None = None
 
     def to_dict(self) -> dict[str, float | None]:
         return {
@@ -53,6 +57,8 @@ class Metrics:
             "redundancy_reduction": self.redundancy_reduction,
             "acceptance_rate": self.acceptance_rate,
             "actionability": self.actionability,
+            "ndcg_at_5": self.ndcg_at_5,
+            "mrr": self.mrr,
         }
 
 
@@ -76,6 +82,31 @@ def _ratio(numerator: int, denominator: int) -> float:
     return round(numerator / denominator, 6)
 
 
+def _dcg(grades: Sequence[int]) -> float:
+    return sum((2**g - 1) / math.log2(i + 2) for i, g in enumerate(grades))
+
+
+def _ndcg_at_k(grades: Sequence[int | None], k: int = 5) -> float | None:
+    if not grades or any(g is None for g in grades):
+        return None
+    g = [int(x) for x in grades[:k]]
+    if not g:
+        return None
+    dcg = _dcg(g)
+    ideal = sorted(g, reverse=True)
+    idcg = _dcg(ideal)
+    if idcg == 0:
+        return 0.0
+    return round(dcg / idcg, 6)
+
+
+def _mrr(grades: Sequence[int | None]) -> float | None:
+    if not grades or any(g is None for g in grades):
+        return None
+    for i, g in enumerate(grades):
+        if g is not None and int(g) > 0:
+            return round(1.0 / (i + 1), 6)
+    return 0.0
 def compute_metrics(outcome: RunOutcome) -> Metrics:
     """ARUM §5 metrics from a run outcome.
 
@@ -100,6 +131,7 @@ def compute_metrics(outcome: RunOutcome) -> Metrics:
     # outcomes); with the outcome_total base recorded alongside for context.
     acceptance_rate = _ratio(accepted, outcome.published_count)
     known = outcome.actionable_known
+    grades = outcome.published_ordered_grades
     return Metrics(
         precision=precision,
         recall=recall,
@@ -113,4 +145,6 @@ def compute_metrics(outcome: RunOutcome) -> Metrics:
         ),
         acceptance_rate=acceptance_rate,
         actionability=(_ratio(outcome.actionable_published, known) if known else None),
+        ndcg_at_5=_ndcg_at_k(grades, 5),
+        mrr=_mrr(grades),
     )
