@@ -163,6 +163,29 @@ export interface GitHubRepo {
   private: boolean;
 }
 
+export interface ExperimentMode {
+  mode: string;
+  label: string;
+  precision: string;
+  recall: string;
+  f1: string;
+  false_positive_rate: string;
+  comment_reduction: string;
+  redundancy_reduction: string;
+  acceptance_rate: string;
+  actionability: string;
+  ndcg_at_5?: string;
+  mrr?: string;
+  selected: string;
+  candidates: string;
+}
+
+export interface ExperimentSummary {
+  modes: ExperimentMode[];
+  execution?: { python?: string; code_version?: { commit?: string; dirty?: boolean } };
+  corpus?: { rows?: number; included?: number; excluded?: number; raw_sha256?: string; file_sha256?: string };
+}
+
 export interface ReviewsPage {
   items: ReviewSummary[];
   nextLimit: number;

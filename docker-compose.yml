@@ -73,6 +73,8 @@ services:
       ADAPTIVE_PROMETHEUS_ENABLED: ${ADAPTIVE_PROMETHEUS_ENABLED:-true}
     ports:
       - "8000:8000"
+    volumes:
+      - ./experiments/results:/app/backend/experiments/results:ro
     healthcheck:
       test:
         [

@@ -75,6 +75,9 @@ class Settings(BaseSettings):
     # the in-memory sink (unit tests) until a path is configured for prod.
     arum_decision_log_path: str = ""
 
+    # --- Experiment artifacts (read-only, for dashboard display) ---------------
+    experiments_results_dir: str = "experiments/results"
+
     # --- Review budget (configurable caps) ----------------------------------
     review_budget_low: int = 5
     review_budget_medium: int = 10
