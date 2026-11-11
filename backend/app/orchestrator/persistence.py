@@ -217,12 +217,10 @@ def _iteration_dict(iteration: ReviewIteration) -> dict[str, Any]:
 def _to_float(value: object) -> float | None:
     if value is None or isinstance(value, bool):
         return None
-    if isinstance(value, (int, float, str)):
-        try:
-            return float(value)
-        except (TypeError, ValueError):
-            return None
-    return None
+    try:
+        return float(value)  # type: ignore[arg-type]
+    except (TypeError, ValueError):
+        return None
 
 
 def _to_iso(value: datetime | None) -> str | None:

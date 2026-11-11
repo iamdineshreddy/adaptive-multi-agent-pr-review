@@ -11,6 +11,7 @@ import type {
 } from "../types";
 
 const BASE = "/api/v1";
+const TOKEN = import.meta.env.VITE_API_TOKEN as string | undefined;
 
 class ApiError extends Error {
   constructor(
@@ -23,7 +24,9 @@ class ApiError extends Error {
 }
 
 async function getJson<T>(path: string): Promise<T> {
-  const response = await fetch(`${BASE}${path}`);
+  const response = await fetch(`${BASE}${path}`, {
+    headers: TOKEN ? { Authorization: `Bearer ${TOKEN}` } : undefined,
+  });
   if (!response.ok) {
     let message = `Request failed (${response.status})`;
     try {
