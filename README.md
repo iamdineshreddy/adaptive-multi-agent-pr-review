@@ -123,7 +123,7 @@ pip install -e ".[dev,all]"
 cp ../.env.example .env
 alembic upgrade head                # needs PostgreSQL
 uvicorn app.main:app --reload       # http://localhost:8000/api/docs
-pytest -q                           # 578 passed / 19 skipped (no infra)
+pytest -q                           # 600 passed / 15 skipped (no infra)
 ```
 
 Full stack (needs a Docker host):
@@ -216,7 +216,7 @@ measures (latency, tokens, cost, queue throughput, NDCG/MRR) stay labelled
 (0 trainable candidates). Live Docker/GitHub E2E validation requires
 infrastructure not available in this environment.
 
-Suite today: **578 passed / 19 skipped** (13 PostgreSQL-dependent, 6
+Suite today: **600 passed / 15 skipped** (all 15 are live-service: PostgreSQL + Redis)
 Compose-smoke — all lanes self-skip when the services are unreachable),
 ruff + ruff-format + strict mypy clean, 85% line coverage over
 `backend/app`. See `docs/TESTING.md`.

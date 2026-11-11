@@ -83,14 +83,14 @@ def _ratio(numerator: int, denominator: int) -> float:
 
 
 def _dcg(grades: Sequence[int]) -> float:
-    return sum((2**g - 1) / math.log2(i + 2) for i, g in enumerate(grades))
+    return float(sum((2**g - 1) / math.log2(i + 2) for i, g in enumerate(grades)))
 
 
 def _ndcg_at_k(grades: Sequence[int | None], k: int = 5) -> float | None:
     if not grades or any(g is None for g in grades):
         return None
-    g = [int(x) for x in grades[:k]]
-    if not g:
+    g = [int(x) for x in grades[:k] if x is not None]
+    if len(g) != min(k, len(grades)):
         return None
     dcg = _dcg(g)
     ideal = sorted(g, reverse=True)
@@ -107,6 +107,8 @@ def _mrr(grades: Sequence[int | None]) -> float | None:
         if g is not None and int(g) > 0:
             return round(1.0 / (i + 1), 6)
     return 0.0
+
+
 def compute_metrics(outcome: RunOutcome) -> Metrics:
     """ARUM §5 metrics from a run outcome.
 
