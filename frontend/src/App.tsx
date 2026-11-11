@@ -4,7 +4,6 @@ import DashboardPage from "./pages/DashboardPage";
 import ReviewsPage from "./pages/ReviewsPage";
 import ReviewDetailPage from "./pages/ReviewDetailPage";
 import RepositoriesPage from "./pages/RepositoriesPage";
-import GitHubReposPage from "./pages/GitHubReposPage";
 import MetricsPage from "./pages/MetricsPage";
 
 export default function App() {
@@ -15,7 +14,6 @@ export default function App() {
         <Route path="reviews" element={<ReviewsPage />} />
         <Route path="reviews/:reviewId" element={<ReviewDetailPage />} />
         <Route path="repositories" element={<RepositoriesPage />} />
-        <Route path="github" element={<GitHubReposPage />} />
         <Route path="metrics" element={<MetricsPage />} />
       </Route>
     </Routes>

@@ -1,94 +1,91 @@
 import { useCallback } from "react";
 import {
   fetchRepositories,
-  fetchRepositoryMemory,
-  fetchRepositoryFeedback,
+  fetchGitHubRepos,
+  fetchReviews,
 } from "../services/api";
 import { useAsyncData } from "../hooks/useAsyncData";
-import type { FeedbackEntry, RepositoryMemory, RepositorySummary } from "../types";
+import type { RepositorySummary, GitHubRepo, ReviewSummary } from "../types";
 
 export default function RepositoriesPage() {
-  const load = useCallback(() => fetchRepositories(), []);
-  const { data: repos, error } = useAsyncData<RepositorySummary[]>(load);
+  const load = useCallback(async () => {
+    const [ghRepos, dbRepos, reviewsPage] = await Promise.all([
+      fetchGitHubRepos().catch(() => [] as GitHubRepo[]),
+      fetchRepositories().catch(() => [] as RepositorySummary[]),
+      fetchReviews(undefined, 200, 0).catch(() => ({ items: [] as ReviewSummary[], nextLimit: 0, nextOffset: 0 })),
+    ]);
+    const reviewsByRepo = new Map<string, number>();
+    for (const r of reviewsPage.items) {
+      const name = r.pull_request.repository;
+      reviewsByRepo.set(name, (reviewsByRepo.get(name) ?? 0) + 1);
+    }
+    const dbByName = new Map(dbRepos.map((r) => [r.full_name, r]));
+    return ghRepos.map((g) => ({
+      github: g,
+      recorded: dbByName.get(g.full_name) ?? null,
+      reviewCount: reviewsByRepo.get(g.full_name) ?? 0,
+    }));
+  }, []);
+
+  const { data, error } = useAsyncData(load);
 
   if (error) return <p className="text-red-700">Error: {error}</p>;
-  if (!repos) return <p className="text-slate-500">Loading...</p>;
+  if (!data) return <p className="text-slate-500">Loading repositories...</p>;
 
   return (
     <section>
       <h2 className="mb-4 text-xl font-semibold">Repositories</h2>
-      {repos.length === 0 ? (
-        <p className="text-slate-500">No repositories recorded.</p>
+      <p className="mb-4 text-sm text-slate-500">
+        Live GitHub data ({data.length} repositories) with review activity.
+      </p>
+      {data.length === 0 ? (
+        <p className="text-slate-500">No repositories found.</p>
       ) : (
-        <ul className="divide-y divide-slate-100 rounded-lg border border-slate-200 bg-white shadow-sm">
-          {repos.map((repo) => (
-            <li key={repo.id} className="px-4 py-3">
-              <details>
-                <summary className="cursor-pointer font-medium text-slate-800">
-                  {repo.full_name}
-                  <span className="ml-3 text-xs font-normal text-slate-500">
-                    {repo.main_language ?? "unknown"} · {repo.default_branch ?? "—"}
-                  </span>
-                </summary>
-                <div className="mt-3 grid gap-4 md:grid-cols-2">
-                  <MemoryPanel repositoryId={repo.id} />
-                  <FeedbackPanel repositoryId={repo.id} />
-                </div>
-              </details>
-            </li>
-          ))}
-        </ul>
+        <div className="overflow-x-auto rounded-lg border border-slate-200 bg-white shadow-sm">
+          <table className="min-w-full divide-y divide-slate-200 text-sm">
+            <thead className="bg-slate-50">
+              <tr>
+                <th className="px-4 py-2 text-left font-semibold text-slate-600">Repository</th>
+                <th className="px-4 py-2 text-left font-semibold text-slate-600">Language</th>
+                <th className="px-4 py-2 text-right font-semibold text-slate-600">Stars</th>
+                <th className="px-4 py-2 text-right font-semibold text-slate-600">Forks</th>
+                <th className="px-4 py-2 text-right font-semibold text-slate-600">Open Issues</th>
+                <th className="px-4 py-2 text-right font-semibold text-slate-600">Reviews</th>
+                <th className="px-4 py-2 text-left font-semibold text-slate-600">Updated</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-slate-100">
+              {data.map((row) => (
+                <tr key={row.github.id}>
+                  <td className="px-4 py-2">
+                    <a
+                      href={row.github.html_url}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="font-medium text-blue-700 hover:underline"
+                    >
+                      {row.github.full_name}
+                    </a>
+                    {row.github.private && (
+                      <span className="ml-2 rounded bg-slate-100 px-1.5 py-0.5 text-xs text-slate-500">
+                        private
+                      </span>
+                    )}
+                  </td>
+                  <td className="px-4 py-2 text-slate-600">{row.github.language ?? "-"}</td>
+                  <td className="px-4 py-2 text-right text-slate-600">{row.github.stars}</td>
+                  <td className="px-4 py-2 text-right text-slate-600">{row.github.forks}</td>
+                  <td className="px-4 py-2 text-right text-slate-600">{row.github.open_issues}</td>
+                  <td className="px-4 py-2 text-right text-slate-600">{row.reviewCount}</td>
+                  <td className="px-4 py-2 text-slate-500">
+                    {row.github.updated_at ? new Date(row.github.updated_at).toLocaleDateString() : "-"}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
       )}
     </section>
-  );
-}
-
-function MemoryPanel({ repositoryId }: { repositoryId: string }) {
-  const load = useCallback(() => fetchRepositoryMemory(repositoryId), [repositoryId]);
-  const { data, error } = useAsyncData<RepositoryMemory>(load);
-  return (
-    <div className="rounded-lg border border-slate-100 bg-slate-50 p-3">
-      <p className="text-xs font-semibold uppercase text-slate-500">
-        Memory (version {data?.version ?? "?"})
-      </p>
-      {error ? (
-        <p className="mt-1 text-xs text-red-700">{error}</p>
-      ) : data === null ? (
-        <p className="mt-1 text-xs text-slate-500">Loading...</p>
-      ) : (
-        <pre className="mt-2 max-h-64 overflow-auto text-xs text-slate-700">
-          {JSON.stringify(data, null, 2)}
-        </pre>
-      )}
-    </div>
-  );
-}
-
-function FeedbackPanel({ repositoryId }: { repositoryId: string }) {
-  const load = useCallback(() => fetchRepositoryFeedback(repositoryId), [repositoryId]);
-  const { data, error } = useAsyncData<FeedbackEntry[]>(load);
-  return (
-    <div className="rounded-lg border border-slate-100 bg-slate-50 p-3">
-      <p className="text-xs font-semibold uppercase text-slate-500">Feedback</p>
-      {error ? (
-        <p className="mt-1 text-xs text-red-700">{error}</p>
-      ) : data === null ? (
-        <p className="mt-1 text-xs text-slate-500">Loading...</p>
-      ) : data.length === 0 ? (
-        <p className="mt-1 text-xs text-slate-500">No feedback events.</p>
-      ) : (
-        <ul className="mt-2 divide-y divide-slate-200 text-xs">
-          {data.map((entry) => (
-            <li key={entry.id} className="flex items-center gap-2 py-1.5">
-              <span className="font-medium text-slate-700">{entry.outcome}</span>
-              <span className="text-slate-500">by {entry.author_login ?? "unknown"}</span>
-              <span className="ml-auto text-slate-400">
-                {entry.created_at ? new Date(entry.created_at).toLocaleString() : "—"}
-              </span>
-            </li>
-          ))}
-        </ul>
-      )}
-    </div>
   );
 }
