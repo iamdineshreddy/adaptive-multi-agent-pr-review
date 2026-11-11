@@ -8,6 +8,7 @@ import type {
   ReviewsPage,
   ReviewDetail,
   ReviewStatus,
+  GitHubRepo,
 } from "../types";
 
 const BASE = "/api/v1";
@@ -81,4 +82,6 @@ export async function fetchMetrics(): Promise<MetricsRollup> {
   return getJson<MetricsRollup>("/metrics");
 }
 
-export { ApiError };
+export async function fetchGitHubRepos(): Promise<GitHubRepo[]> {
+  return getJson<GitHubRepo[]>("/github/repos");
+}

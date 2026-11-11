@@ -148,6 +148,21 @@ export interface MetricsRollup {
   agent_metrics: AgentMetrics;
 }
 
+export interface GitHubRepo {
+  id: number;
+  full_name: string;
+  name: string;
+  description: string | null;
+  language: string | null;
+  stars: number;
+  forks: number;
+  open_issues: number;
+  default_branch: string | null;
+  updated_at: string | null;
+  html_url: string;
+  private: boolean;
+}
+
 export interface ReviewsPage {
   items: ReviewSummary[];
   nextLimit: number;

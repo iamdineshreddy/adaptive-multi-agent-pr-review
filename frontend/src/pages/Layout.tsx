@@ -4,6 +4,7 @@ const NAV_LINKS = [
   { to: "/", label: "Dashboard" },
   { to: "/reviews", label: "Reviews" },
   { to: "/repositories", label: "Repositories" },
+  { to: "/github", label: "GitHub Repos" },
   { to: "/metrics", label: "Metrics" },
 ] as const;
 
