@@ -63,6 +63,8 @@ def _docker(*args: str) -> subprocess.CompletedProcess[str]:
         ["docker", *args],
         capture_output=True,
         text=True,
+        encoding="utf-8",
+        errors="replace",
         timeout=_BOOT_TIMEOUT_S,
     )
 
@@ -94,12 +96,22 @@ def _compose_ps() -> dict[str, dict[str, str]]:
             entry = json.loads(line)
         except json.JSONDecodeError:
             continue
-        name = str(entry.get("name") or entry.get("service") or "")
-        if name:
-            services[name] = {
-                "state": str(entry.get("state") or ""),
-                "health": str(entry.get("health") or ""),
-            }
+        # Docker's `--format json` emits capitalised keys on some versions
+        # and lower-case on others; accept both.
+        name = str(
+            entry.get("Name")
+            or entry.get("name")
+            or entry.get("Service")
+            or entry.get("service")
+            or ""
+        )
+        service = str(entry.get("Service") or entry.get("service") or "")
+        state = str(entry.get("State") or entry.get("state") or "")
+        health = str(entry.get("Health") or entry.get("health") or "")
+        if service:
+            services[service] = {"state": state, "health": health}
+        if name and name not in services:
+            services[name] = {"state": state, "health": health}
     return services
 
 

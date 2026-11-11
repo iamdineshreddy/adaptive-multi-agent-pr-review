@@ -440,7 +440,11 @@ def build_llm_provider(settings: Settings) -> LLMProvider:
     """
     provider_name = (settings.llm_provider or "mock").lower()
     if provider_name == "mock":
-        return MockLLMProvider()
+        # The queue-only MockLLMProvider raises once its response list is empty;
+        # a live stack needs deterministic schema-valid output instead.
+        from app.agents.offline import OfflineHeuristicProvider
+
+        return OfflineHeuristicProvider()
 
     primary: LLMProvider
     fallback: LLMProvider | None = None

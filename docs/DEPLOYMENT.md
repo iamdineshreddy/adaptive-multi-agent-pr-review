@@ -61,7 +61,7 @@ reachable from the frontend or metrics network.
 
 | Container | Runs | Healthcheck | Notes |
 | --- | --- | --- | --- |
-| `postgres` | 16-alpine | `pg_isready` | volume `pgdata` |
+| `postgres` | `pgvector/pgvector:pg16` | `pg_isready` | volume `pgdata`; the extension is required by migration `0005` |
 | `redis` | 7-alpine AOF | `redis-cli ping` | volume `redisdata`; broker+backend+priority zset + dead-letter log |
 | `api` | uvicorn :8000 | `/health` | applies migrations; bearer-gated metrics; `/api/docs` in dev |
 | `worker` | celery + `worker_exporter` :8001 | exporter `/health` | consumes all QUEUE.md §1 queues on `default,review_task,pr_ingestion,security,...,feedback` |
@@ -78,16 +78,25 @@ values:
 
 - **API tokens**: dashboards + Prometheus authenticate with a bearer token. The
   app stores only SHA-256 digests (`ADAPTIVE_API_TOKEN_HASHES` — a JSON array)
-  plus `ADAPTIVE_API_TOKEN_ROLES` (JSON digest→role). Prometheus holds the raw
-  token as `ADAPTIVE_API_TOKEN`. Mint one with:
+  plus `ADAPTIVE_API_TOKEN_ROLES` (JSON digest→role). Prometheus and the
+  dashboard bundle need the raw token as `ADAPTIVE_API_TOKEN` in the compose
+  environment, so export it before building/starting the stack:
+  ```
+  export ADAPTIVE_API_TOKEN='<token>'   # PowerShell: $env:ADAPTIVE_API_TOKEN='<token>'
+  docker compose build && docker compose up -d
+  ```
+  Mint one with:
   ```
   python -c "import hashlib;print(hashlib.sha256(b'<token>').hexdigest())"
   ```
 - **Webhook/security**: `ADAPTIVE_SECRET_KEY`, `ADAPTIVE_GITHUB_WEBHOOK_SECRET`.
 - **GitHub App**: `ADAPTIVE_GITHUB_APP_ID` + private key (or PAT fallback);
   empty at boot is fine, ingestion needs them.
-- **LLM**: `ADAPTIVE_LLM_PROVIDER=mock` boots fully offline; `openai`/`anthropic`
-  need the corresponding keys.
+- **LLM**: `ADAPTIVE_LLM_PROVIDER=mock` boots fully offline with a deterministic
+  rule-based provider (`app.agents.offline`): agents emit schema-valid findings
+  from the diff with zero tokens/cost. That exercises the real pipeline but is
+  not a substitute for review quality; `openai`/`anthropic` need the
+  corresponding keys.
 - **Langfuse**: optional; unset keys keep tracing a no-op (OBSERVABILITY.md).
 
 No secret is hardcoded in `.docker-compose.yml` or any image.

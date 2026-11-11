@@ -27,6 +27,8 @@ from app.queue.tasks import (
 from app.webhooks.ingest import SqlReviewIngester
 from app.webhooks.schemas import PullRequestWebhookEvent
 
+pytestmark = pytest.mark.usefixtures("isolated_db_engine")
+
 
 async def _require_services() -> None:
     engine = create_async_engine(get_settings().database_url)

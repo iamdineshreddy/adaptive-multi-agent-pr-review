@@ -23,7 +23,7 @@ integration lane below (never by fakes).
 ## Running the gate
 
 ```bash
-python -m pytest -q            # 578 passed / 19 skipped (13 PostgreSQL-dependent, 6 compose smoke)
+python -m pytest -q            # 600 passed / 15 skipped (all 15 are live-service: PostgreSQL + Redis)
 python -m ruff check .
 python -m ruff format --check .
 python -m mypy app

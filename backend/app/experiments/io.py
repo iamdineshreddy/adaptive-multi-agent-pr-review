@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import csv
+import hashlib
 import json
 from collections.abc import Mapping, Sequence
 from pathlib import Path
@@ -22,6 +23,15 @@ METRIC_KEYS = (
 
 class CorpusFileError(ValueError):
     """Malformed corpus file."""
+
+
+def file_sha256(path: Path) -> str:
+    """SHA-256 of the corpus file's exact bytes (streamed, no full read)."""
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(1 << 20), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
 
 
 def read_corpus_jsonl(path: Path) -> list[dict[str, Any]]:

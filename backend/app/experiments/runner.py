@@ -130,9 +130,33 @@ def run_mode(
     ]
     selected, selection = _select(decisions, config)
     outcome = _outcome(corpus, config.key, candidates, selected)
-    metrics = compute_metrics(outcome)
+    # An empty candidate set means the mode's scope matched nothing in this
+    # corpus (e.g. B1's single reviewer). Zero-division artifacts (0.0) would
+    # read as a measured score, so report every metric as not measurable.
+    measurable = bool(candidates)
+    metrics = compute_metrics(outcome) if measurable else _unmeasured()
     return _payload(
-        corpus, config, seed, weights_payload, selection, metrics, decisions
+        corpus,
+        config,
+        seed,
+        weights_payload,
+        selection,
+        metrics,
+        decisions,
+        measurable=measurable,
+    )
+
+
+def _unmeasured() -> Metrics:
+    return Metrics(
+        precision=None,
+        recall=None,
+        f1=None,
+        false_positive_rate=None,
+        comment_reduction=None,
+        redundancy_reduction=None,
+        acceptance_rate=None,
+        actionability=None,
     )
 
 
@@ -467,6 +491,8 @@ def _payload(
     selection: dict[str, int | None],
     metrics: Metrics,
     decisions: Sequence[Decision],
+    *,
+    measurable: bool,
 ) -> dict[str, Any]:
     return {
         "mode": config.key,
@@ -496,6 +522,15 @@ def _payload(
         "weights": weights_payload,
         "selection": selection,
         "metrics": metrics.to_dict(),
+        "measurable": measurable,
+        "not_measurable_reason": (
+            None
+            if measurable
+            else (
+                f"mode {config.key} produced no candidates for its configured "
+                "scope on this corpus; metrics are undefined, not zero"
+            )
+        ),
         "candidates": len(decisions),
         "top_utilities": [round(d.utility, 6) for d in rank_decisions(decisions)[:5]],
     }

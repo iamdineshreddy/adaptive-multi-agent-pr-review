@@ -9,7 +9,7 @@ separate at every level (see `docs/ARUM.md`).
 
 | Agent | Focus | Typical categories emitted |
 | --- | --- | --- |
-| `security` | OWASP flaws, authn/z, injection, secrets, unsafe data handling, unsafe deps, security config | `security/xss`, `security/sql-injection`, `security/secrets`, `security/authorization`, `security/dependency`, `security/crypto` |
+| `security` | OWASP flaws, authn/z, injection, secrets, unsafe data handling, unsafe deps, security config | `security/xss`, `security/sql-injection`, `security/code-injection`, `security/command-injection`, `security/secrets`, `security/authorization`, `security/dependency`, `security/crypto` |
 | `quality` | maintainability, readability, smells, duplication, error handling, complexity | `quality/maintainability`, `quality/duplication`, `quality/error-handling`, `quality/complexity` |
 | `performance` | loops, expensive ops, db queries, memory, API call nesting, algorithms | `performance/query`, `performance/loop`, `performance/memory`, `performance/api` |
 | `architecture` | layering, SoC, coupling, dependencies, scalability, design consistency | `architecture/layering`, `architecture/coupling`, `architecture/dependency`, `architecture/scalability` |

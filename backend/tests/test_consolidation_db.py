@@ -17,10 +17,11 @@ from sqlalchemy.ext.asyncio import AsyncEngine
 from app.config.settings import get_settings
 from app.consolidation.datatypes import EmbeddingWrite, FindingGroupWrite, FindingWrite
 from app.consolidation.redundancy import REDUNDANCY_METHOD_HYBRID
-from app.consolidation.similarity import vector_sql_literal
 from app.database import SessionFactory, create_db_engine
 from app.models import Base
 from app.orchestrator.persistence import SqlOrchestratorStore
+
+pytestmark = pytest.mark.usefixtures("isolated_db_engine")
 
 REVIEW_ID = uuid.uuid4()
 REPO_ID = uuid.uuid4()
@@ -70,6 +71,7 @@ async def _reset_schema(engine: AsyncEngine) -> None:
 
 
 async def _seed_repo_pr_review(engine: AsyncEngine) -> None:
+    pr_id = uuid.uuid4()
     async with engine.begin() as conn:
         await conn.execute(
             text(
@@ -90,15 +92,15 @@ async def _seed_repo_pr_review(engine: AsyncEngine) -> None:
                 "VALUES (:id, :rid, 9, 9, 't', 'a', 'main', 'feat', 'sha', "
                 "'OPEN', 1, 2, 0)"
             ),
-            {"id": uuid.uuid4(), "rid": REPO_ID},
+            {"id": pr_id, "rid": REPO_ID},
         )
         await conn.execute(
             text(
                 "INSERT INTO reviews (id, pull_request_id, repository_id, status, "
                 "mode, priority_score, risk_class, github_delivery_id) "
-                "VALUES (:id, :rid, :rid, 'DECIDING', 'OPENED', 6.5, 'MEDIUM', :d)"
+                "VALUES (:id, :prid, :rid, 'DECIDING', 'OPENED', 6.5, 'MEDIUM', :d)"
             ),
-            {"id": REVIEW_ID, "rid": REPO_ID, "d": str(uuid.uuid4())},
+            {"id": REVIEW_ID, "prid": pr_id, "rid": REPO_ID, "d": str(uuid.uuid4())},
         )
 
 
@@ -148,7 +150,7 @@ async def test_sql_store_persists_consolidated_findings_groups_and_embeddings() 
                     finding_id=security.id,
                     repository_id=str(REPO_ID),
                     content_hash="abc123",
-                    vector=(0.1, 0.2, 0.3),
+                    vector=(0.1, 0.2, 0.3) + (0.0,) * 1533,
                     model="mock/text-embedding",
                 )
             ],
@@ -182,19 +184,20 @@ async def test_sql_store_persists_consolidated_findings_groups_and_embeddings() 
 
         assert len(findings) == 2
         assert {row.publication_status for row in findings} == {"CANDIDATE"}
-        assert {row.agent_id for row in findings} == set(agent_ids.values())
-        assert {row.duplicate_group for row in findings} == {destination_group}
+        assert {str(row.agent_id) for row in findings} == set(agent_ids.values())
+        assert {str(row.duplicate_group) for row in findings} == {destination_group}
         assert {row.category for row in findings} == {"security/xss"}
 
         assert len(groups) == 1
         assert groups[0].member_count == 2
         assert groups[0].redundancy_method == REDUNDANCY_METHOD_HYBRID
-        assert groups[0].representative_finding_id == security.id
+        assert groups[0].representative_finding_id == uuid.UUID(security.id)
 
         assert len(embeds) == 1
         assert embeds[0].content_hash == "abc123"
         assert embeds[0].model == "mock/text-embedding"
-        assert embeds[0].vector_text == vector_sql_literal((0.1, 0.2, 0.3))
+        stored_vector = [float(x) for x in embeds[0].vector_text.strip("[]").split(",")]
+        assert stored_vector == [0.1, 0.2, 0.3] + [0.0] * 1533
     finally:
         await engine.dispose()
 

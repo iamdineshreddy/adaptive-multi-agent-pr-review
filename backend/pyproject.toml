@@ -33,6 +33,9 @@ db = [
 ]
 queue = [
     "celery[redis]>=5.4,<6",
+    # kombu 5.7's Redis transport refuses redis-py < 6.1, but this project pins
+    # redis < 6; keep the broker transport on the last compatible line.
+    "kombu[redis]>=5.3,<5.7",
     "redis>=5.0,<6",
 ]
 llm = [

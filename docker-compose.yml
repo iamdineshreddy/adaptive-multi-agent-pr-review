@@ -12,7 +12,9 @@ name: adaptive-review
 
 services:
   postgres:
-    image: postgres:16-alpine
+    # pgvector is required by migration 0005 (embeddings HNSW index); the plain
+    # postgres image ships without the extension and migrations fail on boot.
+    image: pgvector/pgvector:pg16
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-adaptive}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-adaptive}
@@ -41,6 +43,10 @@ services:
     restart: unless-stopped
 
   api:
+    # api/worker/scheduler run the same application image; naming it lets one
+    # `docker compose build` produce it once instead of three near-identical
+    # images (each rebuild would otherwise re-run the full pip install).
+    image: adaptive-review-backend:local
     build:
       context: .
       dockerfile: infra/docker/backend/Dockerfile
@@ -86,6 +92,7 @@ services:
     restart: unless-stopped
 
   worker:
+    image: adaptive-review-backend:local
     build:
       context: .
       dockerfile: infra/docker/backend/Dockerfile
@@ -105,18 +112,19 @@ services:
       ADAPTIVE_SKIP_MIGRATIONS: "true"
     ports:
       - "8001:8001"
+    # Healthy means BOTH processes are alive: the :8001 exporter answers AND the
+    # Celery worker replies to inspect ping. Exporter-only checks reported
+    # "healthy" while a dead worker was crash-looping on a broker error.
     healthcheck:
       test:
-        [
-          "CMD",
-          "python",
-          "-c",
-          "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8001/health', timeout=2).status==200 else 1)",
-        ]
-      interval: 10s
-      timeout: 5s
-      retries: 6
-      start_period: 20s
+        - CMD-SHELL
+        - >-
+          python -c "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8001/health', timeout=2).status==200 else 1)"
+          && celery -A app.queue.celery_app:celery_app inspect ping -d worker@$$(hostname) --timeout 5 2>&1 | grep -q pong
+      interval: 30s
+      timeout: 20s
+      retries: 3
+      start_period: 30s
     depends_on:
       postgres: { condition: service_healthy }
       redis: { condition: service_healthy }
@@ -124,6 +132,7 @@ services:
     restart: unless-stopped
 
   scheduler:
+    image: adaptive-review-backend:local
     build:
       context: .
       dockerfile: infra/docker/backend/Dockerfile
@@ -151,6 +160,9 @@ services:
     build:
       context: .
       dockerfile: infra/docker/frontend/Dockerfile
+      args:
+        # Bearer token baked into the dashboard bundle (dev/demo only).
+        VITE_API_TOKEN: ${ADAPTIVE_API_TOKEN:-}
     ports:
       - "80:80"
     depends_on:
@@ -166,10 +178,12 @@ services:
   prometheus:
     image: prom/prometheus:latest
     command: ["--config.file=/etc/prometheus/prometheus.yml"]
+    entrypoint: ["/bin/sh", "/etc/prometheus/entrypoint.sh"]
     environment:
       ADAPTIVE_API_TOKEN: ${ADAPTIVE_API_TOKEN:-}
     volumes:
       - ./infra/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./infra/prometheus/entrypoint.sh:/etc/prometheus/entrypoint.sh:ro
       - promdata:/prometheus
     ports:
       - "9090:9090"

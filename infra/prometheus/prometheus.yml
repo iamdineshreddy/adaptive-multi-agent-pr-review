@@ -6,10 +6,12 @@ scrape_configs:
   - job_name: adaptive-review-api
     metrics_path: /api/v1/monitoring/prometheus
     # Requires a Phase 15 bearer token (digest in ADAPTIVE_API_TOKEN_HASHES);
-    # viewer role is enough for read-only metrics.
+    # viewer role is enough for read-only metrics. Prometheus does not expand
+    # env vars in this file, so the container entrypoint writes the token to
+    # the file referenced here (see infra/prometheus/entrypoint.sh).
     authorization:
       type: Bearer
-      credentials: ${ADAPTIVE_API_TOKEN}
+      credentials_file: /tmp/adaptive-api-token
     static_configs:
       - targets: ["api:8000"]
         labels:
@@ -18,7 +20,7 @@ scrape_configs:
     metrics_path: /api/v1/monitoring/prometheus
     authorization:
       type: Bearer
-      credentials: ${ADAPTIVE_API_TOKEN}
+      credentials_file: /tmp/adaptive-api-token
     static_configs:
       - targets: ["worker:8001"]
         labels:

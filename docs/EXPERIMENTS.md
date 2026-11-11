@@ -259,13 +259,17 @@ python experiments/run/plot_summary.py --results-dir experiments/results --label
 
 Artifacts: `experiments/results/{summary.csv, summary.json, runs/*.json,
 plot_metrics.png, plot_deltas_vs_b5.png}` (gitignored, regenerable). Execution
-block: seed 0, Python 3.11.0, commit `1b8bbb2` (dirty), offline
+block: seed 0, Python 3.11.0, commit `edbdf8b` (dirty), offline
 selection-layer harness — no LLM invoked. Corpus: 494 rows / 483 included /
-11 excluded, raw sha256 `d74e66f998bbb672fd88ff5b5811f35a12d927e07801baebbdd873cc7115046c`.
+11 excluded; on-disk file sha256
+`b5664972af4d39535f3ef08d80f0dabc6c249c091c8c6f7c82df969b3c9a34ef`
+(`summary.json` → `corpus.file_sha256`), parsed-record digest
+`d74e66f998bbb672fd88ff5b5811f35a12d927e07801baebbdd873cc7115046c`
+(`corpus.raw_sha256`).
 
 | mode | Precision | Recall | F1 | FPR | Comment red. | Redundancy red. | Acceptance | Actionability | selected | candidates |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| B1 | 0.000000 | 0.000000 | 0.000000 | 0.000000 | 0.000000 | 0.000000 | 0.000000 | n/a | 0 | 0 |
+| B1 | n/a | n/a | n/a | n/a | n/a | n/a | n/a | n/a | 0 | 0 |
 | B2 | 0.860996 | 1.000000 | 0.925307 | 0.000000 | 0.000000 | 0.002070 | 0.860996 | 0.981328 | 482 | 482 |
 | B3 | 0.860996 | 1.000000 | 0.925307 | 0.000000 | 0.000000 | 0.002070 | 0.860996 | 0.981328 | 482 | 482 |
 | B4 | 0.860996 | 1.000000 | 0.925307 | 0.000000 | 0.000000 | 0.002070 | 0.860996 | 0.981328 | 482 | 482 |
@@ -281,9 +285,9 @@ Reading the table (measured, not assumed):
 
 - **B1 is NOT MEASURABLE on this corpus.** Its filter `reviewer == "primary"`
   matches 0 rows because the approved mapping (`datasets/DATASET_MAPPING_PROPOSAL.md`
-  D5) attributes every row to one of the five agent keys; the `0.000000` cells
-  are zero-division artifacts of an empty configuration, **not** a performance
-  result. Disposition: reported as not measurable (no mode redefinition).
+  D5) attributes every row to one of the five agent keys. The mode is therefore
+  reported as `n/a` in every metric cell (`measurable=false` in
+  `summary.json`), **not** as a zero score.
 - **B2–B5 and A1/A2/A4/A5/A6 are numerically identical because the corpus
   leaves the adaptive layers nothing to act on** (all counters measured): the
   per-review budget of 10 never binds (max 4 candidate groups per review,

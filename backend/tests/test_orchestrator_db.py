@@ -9,6 +9,7 @@ including the new ``supervisor_notes``/``status_history`` JSONB columns
 from __future__ import annotations
 
 import uuid
+from decimal import Decimal
 
 import pytest
 from sqlalchemy import text
@@ -20,6 +21,8 @@ from app.models import Base, Finding
 from app.models.enums import FindingStatus, ReviewStatus, TaskStatus
 from app.orchestrator.iteration import DeltaAction, Resolution
 from app.orchestrator.persistence import SqlOrchestratorStore, TaskWrite
+
+pytestmark = pytest.mark.usefixtures("isolated_db_engine")
 
 
 async def _require_db() -> None:
@@ -172,7 +175,7 @@ async def test_sql_store_syncs_agents_tasks_and_metrics() -> None:
             ).all()
         assert tasks == [("security_queue", "SUCCESS", 1)]
         assert metrics[0].duration_ms == 15
-        assert metrics[0].cost_usd == 0.01
+        assert metrics[0].cost_usd == Decimal("0.01")
     finally:
         await engine.dispose()
 

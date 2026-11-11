@@ -10,7 +10,7 @@ from __future__ import annotations
 import asyncio
 from logging.config import fileConfig
 
-from sqlalchemy import pool
+from sqlalchemy import inspect, pool, text
 from sqlalchemy.engine import Connection
 from sqlalchemy.ext.asyncio import async_engine_from_config
 
@@ -42,7 +42,36 @@ def run_migrations_offline() -> None:
         context.run_migrations()
 
 
+def _widen_version_table(connection: Connection) -> None:
+    """Make ``alembic_version.version_num`` fit human-readable revision ids.
+
+    Alembic creates the version table as ``VARCHAR(32)``. Revision ids here are
+    descriptive (``0006_repository_memory_learned_weights`` is 38 characters),
+    so a fresh database fails on ``UPDATE alembic_version``. Pre-create the
+    table with a wider column, or widen an existing one in place.
+    """
+    if inspect(connection).has_table("alembic_version"):
+        connection.execute(
+            text(
+                "ALTER TABLE alembic_version ALTER COLUMN version_num TYPE VARCHAR(255)"
+            )
+        )
+    else:
+        connection.execute(
+            text(
+                "CREATE TABLE alembic_version ("
+                "version_num VARCHAR(255) NOT NULL, "
+                "CONSTRAINT alembic_version_pkc PRIMARY KEY (version_num))"
+            )
+        )
+    # The DDL above autobegins a transaction. Alembic treats an already-open
+    # transaction as caller-managed and would skip its own commit, so release it
+    # here and let Alembic own the migration transaction.
+    connection.commit()
+
+
 def do_run_migrations(connection: Connection) -> None:
+    _widen_version_table(connection)
     context.configure(
         connection=connection, target_metadata=target_metadata, compare_type=True
     )

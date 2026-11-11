@@ -121,6 +121,20 @@ def test_b1_restricts_to_single_reviewer() -> None:
     assert payload["candidates"] == 1  # only the primary-reviewer row
 
 
+def test_b1_without_primary_rows_is_not_measurable() -> None:
+    """Zero-division artifacts must not be presented as measured scores."""
+    corpus = build_corpus(
+        [_rec("v1", "b.py", 40, "quality/maintainability", "medium", 0.6, "quality")],
+        source="t",
+    )
+    payload = run_mode(corpus, BASELINES["B1"], seed=0)
+    assert payload["candidates"] == 0
+    assert payload["measurable"] is False
+    assert "no candidates" in payload["not_measurable_reason"]
+    assert payload["metrics"]["precision"] is None
+    assert all(value is None for value in payload["metrics"].values())
+
+
 # --- B5: gates fire (mandatory / protected / suppressed) ------------------
 
 

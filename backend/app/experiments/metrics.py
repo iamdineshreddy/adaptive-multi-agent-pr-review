@@ -34,13 +34,13 @@ class RunOutcome:
 
 @dataclass(frozen=True)
 class Metrics:
-    precision: float
-    recall: float
-    f1: float
-    false_positive_rate: float
-    comment_reduction: float
-    redundancy_reduction: float
-    acceptance_rate: float
+    precision: float | None
+    recall: float | None
+    f1: float | None
+    false_positive_rate: float | None
+    comment_reduction: float | None
+    redundancy_reduction: float | None
+    acceptance_rate: float | None
     actionability: float | None
 
     def to_dict(self) -> dict[str, float | None]:

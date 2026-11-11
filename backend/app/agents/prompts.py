@@ -118,6 +118,8 @@ PROMPT_SPECS: dict[str, AgentPromptSpec] = {
         categories=(
             "security/xss",
             "security/sql-injection",
+            "security/code-injection",
+            "security/command-injection",
             "security/secrets",
             "security/authorization",
             "security/dependency",

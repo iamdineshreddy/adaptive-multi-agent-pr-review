@@ -19,6 +19,23 @@ def client() -> TestClient:
 
 
 @pytest.fixture
+async def isolated_db_engine():
+    """Release the process-wide async engine around a live-DB test.
+
+    ``app.database.engine`` is created once per process and pools asyncpg
+    connections. pytest-asyncio gives every test its own event loop, so a
+    connection created in test A's loop cannot be reused in test B's loop
+    ("Event loop is closed"). Disposing before and after keeps each live test
+    on connections born in its own loop. Only live-service modules request it.
+    """
+    from app.database import engine
+
+    await engine.dispose()
+    yield engine
+    await engine.dispose()
+
+
+@pytest.fixture
 def finding_data() -> dict[str, Any]:
     """A valid AgentFinding-shaped dict (copy + override keys per test)."""
     return {

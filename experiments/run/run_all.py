@@ -26,6 +26,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "backend"))
 from app.experiments.corpus import Corpus, build_corpus
 from app.experiments.io import (
     compare_to_baseline,
+    file_sha256,
     read_corpus_jsonl,
     write_json,
     write_runs_json,
@@ -59,10 +60,10 @@ def _main(argv: list[str] | None = None) -> int:
         run = runs[config.key]
         print(
             f"{config.key:<3} {config.label:<58} "
-            f"P={run['metrics']['precision']:.3f} "
-            f"R={run['metrics']['recall']:.3f} "
-            f"F1={run['metrics']['f1']:.3f} "
-            f"red={run['metrics']['redundancy_reduction']:.3f} "
+            f"P={_fmt(run['metrics']['precision'])} "
+            f"R={_fmt(run['metrics']['recall'])} "
+            f"F1={_fmt(run['metrics']['f1'])} "
+            f"red={_fmt(run['metrics']['redundancy_reduction'])} "
             f"sel={run['selection']['selected_count']}"
         )
 
@@ -74,10 +75,11 @@ def _main(argv: list[str] | None = None) -> int:
                            "A3", "A4", "A5", "A6")],
         extra_columns=("candidates",),
     )
-    write_json(
-        args.results_dir / "summary.json",
-        _summary_payload(corpus, args.seed, runs, deltas),
-    )
+    payload = _summary_payload(corpus, args.seed, runs, deltas)
+    # `corpus.provenance["raw_sha256"]` digests the parsed records; record the
+    # exact on-disk corpus bytes too so a reader can verify the input file.
+    payload["corpus"] = {**payload["corpus"], "file_sha256": file_sha256(args.corpus)}
+    write_json(args.results_dir / "summary.json", payload)
     _print_deltas(deltas)
     return 0
 
@@ -120,14 +122,25 @@ def _summary_payload(
     }
 
 
+def _fmt(value: float | None) -> str:
+    """Format a metric, preserving the not-measurable (None) state."""
+    return "n/a" if value is None else f"{value:.3f}"
+
+
 def _print_deltas(deltas: dict[str, dict[str, float | None]]) -> None:
     print("\nDelta vs B5:")
+
+    def render(name: str, value: float | None) -> str:
+        if value is None:
+            return f"{name}=n/a"
+        # Counts are integers; metrics are fractions. Don't render a count as
+        # "+0.000" (misleading precision) when it is exactly an int.
+        if isinstance(value, int):
+            return f"{name}={value:+d}"
+        return f"{name}={value:+.3f}"
+
     for key, entry in deltas.items():
-        fmt = ", ".join(
-            f"{name}={value:+.3f}" if value is not None else f"{name}=n/a"
-            for name, value in entry.items()
-        )
-        print(f"  {key}: {fmt}")
+        print(f"  {key}: " + ", ".join(render(n, v) for n, v in entry.items()))
 
 
 if __name__ == "__main__":

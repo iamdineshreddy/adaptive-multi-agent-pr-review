@@ -20,6 +20,8 @@ from app.queue.db import fetch_priority_score, mark_review_failed
 from app.webhooks.ingest import IngestOutcome, SqlReviewIngester
 from app.webhooks.schemas import PullRequestWebhookEvent
 
+pytestmark = pytest.mark.usefixtures("isolated_db_engine")
+
 
 async def _require_db() -> None:
     engine = create_async_engine(get_settings().database_url)

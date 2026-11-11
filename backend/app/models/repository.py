@@ -13,6 +13,7 @@ from sqlalchemy import (
     Text,
     UniqueConstraint,
     func,
+    text,
 )
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
@@ -31,13 +32,25 @@ class Repository(Base):
     default_branch: Mapped[str] = mapped_column(Text)
     main_language: Mapped[str | None] = mapped_column(Text)
     github_installation_id: Mapped[int | None] = mapped_column(BigInteger)
+    # These three columns are NOT NULL with Python-side defaults. Mirror the
+    # defaults at the database level too: rows inserted with raw SQL (seed
+    # scripts, ETL, integration tests) must not fail on a null that the ORM
+    # would have filled in.
     priority_overrides: Mapped[dict[str, Any]] = mapped_column(
-        JSONB, default=dict, nullable=False
+        JSONB,
+        default=dict,
+        server_default=text("'{}'::jsonb"),
+        nullable=False,
     )
     review_settings: Mapped[dict[str, Any]] = mapped_column(
-        JSONB, default=dict, nullable=False
+        JSONB,
+        default=dict,
+        server_default=text("'{}'::jsonb"),
+        nullable=False,
     )
-    is_active: Mapped[bool] = mapped_column(default=True, nullable=False)
+    is_active: Mapped[bool] = mapped_column(
+        default=True, server_default=text("true"), nullable=False
+    )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )
